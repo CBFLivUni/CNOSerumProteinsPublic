@@ -68,7 +68,7 @@ Quarto documents (`.qmd`) should be excecuted in the order indicated by numbers 
 13. `13_validationDataImputation.qmd`: Performs imputation on the validation data.
 14. `14_validationDataDiffAbundance.qmd`: Performs differential abundance analysis on the validation data as well as comparative analysis to the differential abundance analysis performed on the discovery data in `06_differentialAbundance.qmd`.
 15. `15_validationDataPredictionModelling.qmd`: Evaluates the performance of the selected candidates on the validation data.
-16. `16_biologicalContextualisation.qmd`: Functional analysis of the candidates via pathway analysis and protein-protein interaction (PPI) network-centric investigation.
+16. `16_biologicalContextualisation.qmd`: Functional annnotation of candidate proteins.
 17. `17_figurePreparation.qmd`: Generation of figures for the publication.
 
 
@@ -85,4 +85,4 @@ This project was performed by a collaboration between the University of Liverpoo
 
 ## Contact
 
-Primary contacts for any information or questions relating to the code or analysis are [Dr Euan McDonnell](https://github.com/EuancRNA) (euan2mcd@liverpool.ac.uk) or [Dr Eva Caamaño Gutiérrez](https://github.com/EvaCaamano) @EvaCaamano (caamano@liverpool.ac.uk). Primary contacts for the data collection, collation and interpretation are Dr Eve Roberts (Eve.Roberts@liverpool.ac.uk) and Prof Christian Hedrich (chedrich@liverpool.ac.uk).
+Primary contacts for any information or questions relating to the code or analysis are [Dr Euan McDonnell](https://github.com/EuancRNA) (euan2mcd@liverpool.ac.uk) or [Dr Eva Caamaño Gutiérrez](https://github.com/EvaCaamano) @EvaCaamano (caamano@liverpool.ac.uk).
