@@ -14,7 +14,7 @@ editor: source
 ```{r}
 
 # Source metadata
-here::i_am("16_figurePreparation.qmd")
+here::i_am("17_figurePreparation.qmd")
 source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
 
 # Source discovery study metadata

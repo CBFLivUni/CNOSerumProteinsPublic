@@ -1,0 +1,235 @@
+---
+title: "Biological Contextualisation"
+author: "Euan McDonnell"
+format: html
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source parameters, functions and install packages
+if (!require(here)) { install.packages("here") }
+here::i_am("16_biologicalContextualisation.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+# Metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata_filtered.R"))
+
+# Source colours
+source(here::here("params", "colors.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Read in validation directory
+validResDir <- readRDS(here::here("params", 
+                                  paste0("validationAnalysis_outputDirectory_",imputMethod,".rds")))
+ 
+```
+
+### Read in sig protein sets
+
+```{r}
+
+# Read in differential protein sets
+allProtSets <- readRDS(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance", 
+                       paste0("chosenProteins_featureSelection_pThr",as.character(candidatePThr),"_treatLog2Thr",as.character(log2ThrVal),".rds")))
+
+```
+
+### Read in 
+
+```{r}
+
+# read in 
+childLimmaRes_vsCNO_ANOVA_Condition <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                             "limmaResults_ANOVA_wrtCNOvContrasts_crossSectionalData.tsv"), sep="\t", header=TRUE)
+childLimmaRes_vsCNO_ANOVA_Condition_dresden <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                                     "limmaResults_ANOVA_wrtCNOvContrasts_crossSectionalData.tsv"), sep="\t", header=TRUE)
+sigRes <- list(AllSig=childLimmaRes_vsCNO_ANOVA_Condition,
+               DresdenOnly=childLimmaRes_vsCNO_ANOVA_Condition_dresden)
+
+```
+
+### Load data
+
+#### Abundance data
+
+```{r}
+
+# Read in cyclic Loess-normalised data
+quantTable_allSamples <- read.table(here::here(diaDir, "normalised", 
+                                    "metaCrossSectional_NormalyzerDE_byCondition", "CycLoess-normalized.txt"), sep="\t", header=TRUE, row.names=1)
+
+# Chosen imputed data
+quantTable_chosenMethod <- read.table(here::here(impDir, paste0("quantTable_imputedWithbPCA.tsv")), sep="\t", header=TRUE, row.names=1)
+
+# Match metadata
+trainMetaData <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "biomarkers",
+                                       "allSamplesMetadata_takenForSelection.tsv"), sep="\t", header=TRUE)
+trainQuantTable <- quantTable_allSamples[,trainMetaData$Sample_ID]
+
+# Get common
+quantTable <- quantTable_allSamples[,trainMetaData$Sample_ID]
+
+# Keep only selected metadata
+quantTable <- quantTable[,!grepl("QC",colnames(quantTable))]
+quantTable_noMissing <- quantTable[!is.na(rowSums(quantTable)),]
+
+```
+
+#### Read in desired proteins
+
+```{r}
+
+# Read in chosen proteins
+finalTargets <- read.table(here::here(validResDir,
+                                      paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,".tsv")), 
+                           sep="\t", 
+                           header=TRUE)
+rownames(finalTargets) <- finalTargets$Protein
+
+```
+
+#### Get FCs wrt Healthy for target proteins
+
+```{r}
+
+# Get targets
+finalTargets_vsHealthy <- merge(finalTargets[,c("Protein",
+                                                "SYMBOL",
+                                                "GENENAME")], 
+                                childLimmaRes_vsCNO_ANOVA_Condition[,c("PG_ID",
+                                                                       "CNOvsHealthy")],
+                                by.x="Protein",
+                                by.y="PG_ID")
+colnames(finalTargets_vsHealthy) <- c("Uniprot ID", 
+                                      "Gene Symbol",
+                                      "Gene Name",
+                                      "LogFC (CNO vs Healthy)")
+write.table(finalTargets_vsHealthy,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_logFC_CNOvsHealthy.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+
+```
+
+## Main
+
+### Functional enrichment analysis
+
+#### Read in pathways
+
+### Functional enrichment analysis
+
+#### Get universe as entrez ID
+
+```{r}
+
+# Get annotations
+background <- AnnotationDbi::select(org.Hs.eg.db,
+                                   keys=rownames(quantTable_allSamples),
+                                   keytype="UNIPROT",
+                                   columns=c("ENTREZID",
+                                             "SYMBOL"))
+backgroundList <- unique(as.character(background$UNIPROT[!is.na(background$UNIPROT)]))
+length(backgroundList)
+
+```
+
+#### Read in pathways
+
+```{r}
+
+# Read in reactome pathways
+reacPaths <- clusterProfiler::read.gmt(here::here(baseDataDir, "annotation", "ontology", "c2.cp.reactome.v2024.1.Hs.entrez.gmt"))
+keggPaths <- clusterProfiler::read.gmt(here::here(baseDataDir, "annotation", "ontology", "c2.cp.kegg_medicus.v2024.1.Hs.entrez.gmt"))
+gobpPaths <- clusterProfiler::read.gmt(here::here(baseDataDir, "annotation", "ontology", "c5.go.bp.v2024.1.Hs.entrez.gmt"))
+
+# Add Uniprot IDs
+reacPathData <- merge(reacPaths, background, by.x="gene", by.y="ENTREZID")
+keggPathData <- merge(keggPaths, background, by.x="gene", by.y="ENTREZID")
+gobpPathData <- merge(gobpPaths, background, by.x="gene", by.y="ENTREZID")
+
+# Make list
+reacPaths <- lapply(split(reacPathData[,-1]$UNIPROT, reacPathData[,-1]$term),function(x) c(x))
+keggPaths <- lapply(split(keggPathData[,-1]$UNIPROT, keggPathData[,-1]$term),function(x) c(x))
+gobpPaths <- lapply(split(gobpPathData[,-1]$UNIPROT, gobpPathData[,-1]$term),function(x) c(x))
+names(reacPaths) <- mgsub(names(reacPaths), c("REACTOME_", "_"), c("", " "))
+names(keggPaths) <- mgsub(names(keggPaths), c("KEGG_", "_"), c("", " "))
+names(gobpPaths) <- mgsub(names(gobpPaths), c("GOBP_", "_"), c("", " "))
+
+# Remove caes with none
+reacPaths <- reacPaths[sapply(reacPaths, function(term) length(term) > 0)]
+keggPaths <- keggPaths[sapply(keggPaths, function(term) length(term) > 0)]
+gobpPaths <- gobpPaths[sapply(gobpPaths, function(term) length(term) > 0)]
+
+```
+
+#### Annotate proteins to terms
+
+This is to just save as a table.
+
+```{r}
+
+# Combine
+finalTargetsReac <- merge(finalTargets,
+                          reacPathData,
+                          by.x="ENTREZID",
+                          by.y="gene")
+finalTargetsKegg <- merge(finalTargets,
+                          keggPathData,
+                          by.x="ENTREZID",
+                          by.y="gene")
+finalTargetsGobp <- merge(finalTargets,
+                          gobpPathData,
+                          by.x="ENTREZID",
+                          by.y="gene")
+
+# Check coverage
+length(unique(finalTargetsReac$Protein))
+length(unique(finalTargetsKegg$Protein))
+length(unique(finalTargetsGobp$Protein))
+
+# Save
+write.table(finalTargets,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,".tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+write.table(finalTargetsReac,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,"_allAnnotatedReactomePathways.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+write.table(finalTargetsKegg,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,"_allAnnotatedKeggPathways.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+write.table(finalTargetsGobp,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,"_allAnnotatedGoBP.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+
+```
+
+
