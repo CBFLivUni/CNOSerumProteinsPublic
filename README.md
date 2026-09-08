@@ -13,7 +13,7 @@
 
 ## Description
 
-This repository contains all code that performs the analysis detailed in publication (TBC). In this, we perform robust, multi-step selection of protein biomarker candidates from serum proteomic profiles of paediatric patients that discriminate chronic non-bacterial osteomyelitis (CNO) from mimicking inflammatory conditions. Code runs analysis from the output data of [Spectronaut](https://biognosys.com/software/spectronaut/) up to figure generation for the publication.
+This repository contains all code that performs the analysis detailed in publication (TBC). In this, we perform robust, multi-step selection of protein biomarker candidates from serum proteomic profiles of paediatric patients that discriminate chronic non-bacterial osteomyelitis (CNO) from mimicking inflammatory conditions. Code runs analysis from the output data of [Spectronaut](https://biognosys.com/software/spectronaut/) up to figure generation for the publication. Please see the Supplementary Methods of the manuscript and Spectronaut parameter files provided in `params/` for details on the Spectronaut analysis.
 
 
 
