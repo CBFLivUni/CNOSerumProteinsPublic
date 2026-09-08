@@ -1,0 +1,160 @@
+---
+title: "Data Imputation"
+format: revealjs
+editor: source
+---
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source metadata
+here::i_am("13_validationDataImputation.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Save as RDS
+plotList <- readRDS(here::here(figDir, 
+                    "12_validationDataNormEDA_figs.rds"))
+ 
+```
+
+## Load data
+
+### Metadata
+
+```{r}
+
+# Source discovery study metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata.R"))
+
+# Read in pivot table
+## Read in protein abundance table of actual samples
+metaCrossSectional_validData <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                                                     "preSchool_validationData_tallFormatClean_samplesFiltered_byMissingness.tsv"), sep="\t", header=TRUE) 
+rownames(metaCrossSectional_validData) <- metaCrossSectional_validData$Sample_ID
+
+# Keep just child cross-sectional
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child",]
+table(metaCrossSectional_validData$Condition)
+
+# Exclude JIA
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Condition != "JIA",]
+table(metaCrossSectional_validData$Condition)
+
+```
+
+### Normalised abundance data
+
+```{r}
+
+# Read in
+qntTableNorm <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised",
+                                      "validationData_quantTable_normalisedCyclicLoess.tsv"), sep="\t", header=TRUE)
+qntTableNorm_noQC <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised",
+                                           "validationData_quantTable_normalisedCyclicLoess_noQCSamples.tsv"), sep="\t", header=TRUE)
+rownames(qntTableNorm) <- qntTableNorm$ProteinGroup
+rownames(qntTableNorm_noQC) <- qntTableNorm_noQC$ProteinGroup
+
+# Get just QC
+qntTableNorm_serumQC <- qntTableNorm[,grepl("PooledPlasma|ProteinGroup",colnames(qntTableNorm))]
+
+```
+
+### Prep data for imputation
+
+```{r}
+
+# Subset metadata
+imputeMetaData <- metaCrossSectional_validData[colnames(qntTableNorm_noQC)[-1],c("Sample_ID","Condition")]
+imputeMetaData <- rbind(data.frame(Sample_ID=colnames(qntTableNorm_serumQC)[-1],
+                                   Condition=rep("Serum_QC", ncol(qntTableNorm_serumQC)-1)),
+                                   imputeMetaData)
+
+# Rename to data_impute to fit emily's code
+data_impute <- qntTableNorm[,imputeMetaData$Sample_ID]
+
+# Get QC-only
+data_impute_QCOnly <- data_impute[,grepl("PooledPlasma",colnames(data_impute))]
+
+# Retain only proteins with non-NAs
+imputDataCross_noNA <- qntTableNorm[!is.na(rowSums(qntTableNorm[,-1])),metaCrossSectional_validData$Sample_ID]
+dim(imputDataCross_noNA)
+
+```
+
+### Imputation with QC samples
+
+#### Perform imputation
+
+```{r}
+
+# Toggle whether to read in if file exists
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "imputation"), 
+           recursive=TRUE)
+impFileName <- here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "imputation", "impMethodsTrialled.rds")
+if (!file.exists(impFileName) | reGenerateFiles) {
+
+  # Run imputation
+  impAllData   <- suppressWarnings(RunAllImputationMethods(data_impute, imputeMetaData, group="Condition"))
+  saveRDS(impAllData, impFileName)
+
+# Else read in from file
+} else {
+  
+  impAllData <- readRDS(impFileName)
+  
+}
+
+# Drop NULLs
+impAllData <- impAllData[!sapply(impAllData, is.null)]
+  
+# Make tall
+imputDataTall <- lapply(names(impAllData), function(method) data.frame(reshape2::melt(data.frame(ProtID=rownames(impAllData[[method]]), impAllData[[method]]), id.vars="ProtID"), Method=method))
+names(imputDataTall) <- names(impAllData)
+  
+# Combine
+imputDataTall <- do.call("rbind",imputDataTall)
+
+# Retain only QC samples
+imputDataTall_qcOnly <- imputDataTall[grepl("PooledPlasma",imputDataTall$variable),]
+
+```
+
+### Save imputed data
+
+```{r}
+
+# Loop over imputation methods
+for (impType in names(impAllData)) {
+
+  # Save
+  print(impType)
+  write.table(data.frame(Protein=rownames(impAllData[[impType]]), impAllData[[impType]][,!grepl("PooledPlasma", colnames(impAllData[[impType]]))]),
+              here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "imputation", 
+                         paste0("quantTable_validationData_imputedWith",impType,".tsv")),
+              sep="\t", quote=FALSE)
+  
+}
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "13_validationDataImputation_figs.rds"))
+
+```
+
+

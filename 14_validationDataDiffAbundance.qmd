@@ -1,0 +1,972 @@
+---
+title: "Validation Data Differential Abundance"
+format: revealjs
+editor: source
+---
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source metadata
+here::i_am("14_validationDataDiffAbundance.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Save as RDS
+plotList <- readRDS(here::here(figDir, 
+                    "13_validationDataImputation_figs.rds"))
+ 
+```
+
+## Load data
+
+### Metadata
+
+```{r}
+
+# Source discovery study metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata.R"))
+
+# Read in pivot table
+## Read in protein abundance table of actual samples
+metaCrossSectional_validData <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                                                     "preSchool_validationData_tallFormatClean_samplesFiltered_byMissingness.tsv"), sep="\t", header=TRUE) 
+rownames(metaCrossSectional_validData) <- metaCrossSectional_validData$Sample_ID
+
+# Keep just child cross-sectional
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child",]
+table(metaCrossSectional_validData$Condition)
+
+# Exclude JIA
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Condition != "JIA",]
+table(metaCrossSectional_validData$Condition)
+
+# Read in additional metadata (with dates)
+addMetaValid <- read.table(here::here(metaDir, "preSchool_additionalMetadata_commonToCrossSectional_validationData.tsv"), 
+                           sep="\t", header=TRUE)
+
+# Keep child drop JIA
+addMetaValid <- addMetaValid[addMetaValid$Age_Group == "Child" & addMetaValid$Condition != "JIA",]
+table(addMetaValid$Condition)
+
+# Scale
+addMetaValid <- addMetaValid[!is.na(addMetaValid$Age) & !is.na(addMetaValid$Date.of.sample),]
+addMetaValid["Z_Age"] <- scale(addMetaValid$Age, scale=TRUE, center=TRUE)
+addMetaValid["Z_Date"] <- scale(as.numeric(as.Date(addMetaValid$Date.of.sample)), scale=TRUE, center=TRUE)
+
+# Drop filtered samples
+addMetaValid <- addMetaValid[which(addMetaValid$Sample_ID %in% metaCrossSectional_validData$Sample_ID),]
+
+```
+
+### Read in abundance data
+
+```{r}
+
+# Read in normalised data
+qntTableNorm <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised",
+                                      "validationData_quantTable_normalisedCyclicLoess.tsv"), sep="\t", header=TRUE)
+rownames(qntTableNorm) <- qntTableNorm$ProteinGroup
+
+```
+
+### Read in desired proteins
+
+```{r}
+
+# Read in chosen proteins
+finalTargets <- read.table(here::here(resCrossDiscoDir, "trainSplitProp0.8", "sampleRandom", "biomarkers", "finalModel",
+                                      "finalTargetProteins.tsv"), sep="\t", header=TRUE)
+rownames(finalTargets) <- finalTargets$Protein
+
+# Get proteins present in all sets
+bestProts <- finalTargets[finalTargets == "No" & finalTargets$inDateAdjustedSet == "Yes",]$Protein
+
+# Check common proteins
+commonProts <- intersect(finalTargets$Protein,
+                         rownames(qntTableNorm))
+
+```
+
+### Read in train/test data
+
+```{r}
+
+# Read in
+childLimmaRes_ANOVACondition_trainTest <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                     "limmaResults_ANOVAwrtCondition_crossSectionalData.tsv"), sep="\t", header=TRUE)
+childLimmaRes_ANOVACondition_dresden_trainTest <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                             "limmaResults_ANOVAwrtCondition_crossSectionalData_justDresdenSamples.tsv"), sep="\t", header=TRUE)
+
+childLimmaRes_vsCNO_ANOVA_trainTest <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                  "limmaResults_ANOVA_wrtCNOvContrasts_crossSectionalData.tsv"), sep="\t", header=TRUE)
+childLimmaRes_vsCNO_ANOVA_dresden_trainTest <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                          "limmaResults_ANOVA_wrtCNOvContrasts_crossSectionalData_justDresdenSamples.tsv"), sep="\t", header=TRUE)
+
+```
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+### Perform all vs all
+
+#### Subset metadata
+
+```{r}
+
+# Subset to site
+metaCrossSectional_validData_dresden <- metaCrossSectional_validData[metaCrossSectional_validData$Site == "Dresden",]
+
+```
+
+#### Scale age
+
+```{r}
+
+# Scale age
+metaCrossSectional_validData["Z_Age"] <- scale(metaCrossSectional_validData$Age, center=TRUE, scale=TRUE)
+metaCrossSectional_validData_dresden["Z_Age"] <- scale(metaCrossSectional_validData_dresden$Age, center=TRUE, scale=TRUE)
+
+```
+
+#### Define models
+
+```{r}
+
+# Define formulas for models
+childValid_modelFormulas <- list(childValidFormulas_condition=" ~ Condition + Z_Age + PLATE + Sex",
+                                 childValidFormulas_site=" ~ Site + Z_Age + PLATE + Sex",
+                                 childValidFormula_condition_noIntercept=" ~ 0 + Condition + Z_Age + Sex + PLATE")
+childValidDate_modelFormulas <- list(childValidFormulas_condition=" ~ Condition + Z_Age + PLATE + Z_Date + Sex",
+                                     childValidFormulas_site=" ~ Site + Z_Age + PLATE + Z_Date + Sex",
+                                     childValidFormula_condition_noIntercept=" ~ 0 + Condition + Z_Age + Sex + Z_Date + PLATE")
+
+# Make designs
+childValidDesign         <- model.matrix(as.formula(childValid_modelFormulas$childValidFormulas_condition), 
+                                         data=metaCrossSectional_validData)
+childValidDesignSite     <- model.matrix(as.formula(childValid_modelFormulas$childValidFormulas_site), 
+                                         data=metaCrossSectional_validData)
+
+childValidDesign_noInt   <- model.matrix(as.formula(childValid_modelFormulas$childValidFormula_condition_noIntercept), 
+                                         data=metaCrossSectional_validData)
+childValidesign_noInt_dresden <- model.matrix(as.formula(childValid_modelFormulas$childValidFormula_condition_noIntercept), 
+                                         data=metaCrossSectional_validData_dresden)
+
+rownames(addMetaValid) <- addMetaValid$Sample_ID
+childValidDateDesign_noInt   <- model.matrix(as.formula(childValidDate_modelFormulas$childValidFormula_condition_noIntercept), 
+                                             data=addMetaValid)
+childValidDatesign_noInt_dresden <- model.matrix(as.formula(childValidDate_modelFormulas$childValidFormula_condition_noIntercept), 
+                                                 data=addMetaValid[addMetaValid$Site == "Dresden",])
+
+# Make contrasts
+childValid_contrastM <- makeContrasts(CNOvsCrohn   = ConditionCNO-ConditionCrohn,
+                                      CNOvsOnc      = ConditionCNO-ConditionOncology,
+                                      CNOvsHealthy  = ConditionCNO-ConditionHealthy,
+                                      CNOvsInfOsteo = ConditionCNO-ConditionInfOsteitis,
+                                      levels=childValidDesign_noInt)
+  
+# Make contrasts
+childValidDate_contrastM <- makeContrasts(CNOvsCrohn   = ConditionCNO-ConditionCrohn,
+                                          CNOvsOnc      = ConditionCNO-ConditionOncology,
+                                          CNOvsHealthy  = ConditionCNO-ConditionHealthy,
+                                          CNOvsInfOsteo = ConditionCNO-ConditionInfOsteitis,
+                                          levels=childValidDateDesign_noInt)
+
+childValid_contrastM <- makeContrasts(CNOvsCrohn    = ConditionCNO-ConditionCrohn,
+                                      CNOvsOnc      = ConditionCNO-ConditionOncology,
+                                      CNOvsInfOsteo = ConditionCNO-ConditionInfOsteitis,
+                                      CNOvsHealthy  = ConditionCNO-ConditionHealthy,
+                                      levels=childValidDesign_noInt)
+childValid_contrastM_CNOvsIOH <- makeContrasts(CNOvsInfOsteo = ConditionCNO-ConditionInfOsteitis,
+                                               CNOvsHealthy = ConditionCNO-ConditionHealthy,
+                                               levels=childValidDesign_noInt)
+childValid_contrastM_dresden <- makeContrasts(CNOvsCrohn   = ConditionCNO-ConditionCrohn,
+                                              CNOvsOnc      = ConditionCNO-ConditionOncology,
+                                              levels=childValidesign_noInt_dresden)
+childValid_contrastM_dresdenDate <- makeContrasts(CNOvsCrohn   = ConditionCNO-ConditionCrohn,
+                                                  CNOvsOnc      = ConditionCNO-ConditionOncology,
+                                                  levels=childValidDatesign_noInt_dresden)
+
+# Make design
+childValidDesign <- model.matrix(as.formula(childValid_modelFormulas$childValidFormulas_condition), 
+                                  data=metaCrossSectional_validData)
+
+# Check rank
+is.fullrank(childValidDesign)
+is.fullrank(childValidDesignSite)
+is.fullrank(childValidDateDesign_noInt)
+is.fullrank(childValidDesign_noInt)
+is.fullrank(childValidesign_noInt_dresden)
+
+```
+
+#### Test
+
+```{r}
+
+# Define levels to test
+levels2Test <- paste0("Condition",unique(metaCrossSectional_validData$Condition))
+levels2Test_site <- paste0("Site",unique(metaCrossSectional_validData$Site))
+
+# Run Limma models
+childLimmaRes_ANOVASite              <- runLimma(qntTableNorm[commonProts,rownames(childValidDesignSite)], 
+                                                 designM=childValidDesignSite,
+                                                 levels2Test=levels2Test_site[which(levels2Test_site %in% colnames(childValidDesignSite))])
+childLimmaRes_ANOVACondition         <- runLimma(qntTableNorm[commonProts,rownames(childValidDesign)], 
+                                                 designM=childValidDesign,
+                                                 levels2Test=levels2Test[which(levels2Test %in% colnames(childValidDesign))])
+
+# No intercept (CNO contrasts)
+childLimmaRes_vsCNO_ANOVA_Condition  <- runLimma(qntTableNorm[commonProts,rownames(childValidDesign_noInt)], 
+                                                 designM=childValidDesign_noInt,
+                                                 levels2Test=colnames(childValid_contrastM),
+                                                 contrasts2Fit=childValid_contrastM)
+childLimmaRes_vsCNO_ANOVA_Condition_Dresden  <- runLimma(qntTableNorm[commonProts,rownames(childValidesign_noInt_dresden)], 
+                                                         designM=childValidesign_noInt_dresden,
+                                                         levels2Test=colnames(childValid_contrastM_dresden),
+                                                         contrasts2Fit=childValid_contrastM_dresden)
+
+# With date
+childLimmaRes_vsCNO_ANOVA_Condition_date  <- runLimma(qntTableNorm[commonProts,
+                                                                   rownames(childValidDateDesign_noInt)], 
+                                                      designM=childValidDateDesign_noInt,
+                                                      levels2Test=colnames(childValidDate_contrastM),
+                                                      contrasts2Fit=childValidDate_contrastM)
+childLimmaRes_vsCNO_ANOVA_Condition_Dresden_date  <- runLimma(qntTableNorm[commonProts,
+                                                                           rownames(childValidDatesign_noInt_dresden)], 
+                                                              designM=childValidDatesign_noInt_dresden,
+                                                              levels2Test=colnames(childValid_contrastM_dresdenDate),
+                                                              contrasts2Fit=childValid_contrastM_dresdenDate)
+
+
+# Get sig
+siteProt <- childLimmaRes_ANOVASite[childLimmaRes_ANOVASite$adj.P.Val < 0.05,] # Just CRP apparently associated with site.
+childLimmaRes_ANOVACondition_sig <- childLimmaRes_ANOVACondition[childLimmaRes_ANOVACondition$adj.P.Val < 0.05,]
+
+childLimmaRes_vsCNO_ANOVA_Condition_sig <- childLimmaRes_vsCNO_ANOVA_Condition[childLimmaRes_vsCNO_ANOVA_Condition$adj.P.Val < 0.05,]
+childLimmaRes_vsCNO_ANOVA_Condition_Dresden_sig <- childLimmaRes_vsCNO_ANOVA_Condition_Dresden[childLimmaRes_vsCNO_ANOVA_Condition_Dresden$adj.P.Val < 0.05,]
+
+childLimmaRes_vsCNO_ANOVA_Condition_date_sig <- childLimmaRes_vsCNO_ANOVA_Condition_date[childLimmaRes_vsCNO_ANOVA_Condition_date$adj.P.Val < 0.05,]
+childLimmaRes_vsCNO_ANOVA_Condition_Dresden_date_sig <- childLimmaRes_vsCNO_ANOVA_Condition_Dresden_date[childLimmaRes_vsCNO_ANOVA_Condition_Dresden_date$adj.P.Val < 0.05,]
+
+# Overlap selected proteins
+finalTargets[intersect(childLimmaRes_ANOVACondition_sig$PG_ID, finalTargets$Protein),]
+
+finalTargets[intersect(childLimmaRes_vsCNO_ANOVA_Condition_sig$PG_ID, finalTargets$Protein),]
+finalTargets[intersect(childLimmaRes_vsCNO_ANOVA_Condition_Dresden_sig$PG_ID, finalTargets$Protein),]
+
+finalTargets[intersect(childLimmaRes_vsCNO_ANOVA_Condition_date_sig$PG_ID, finalTargets$Protein),]
+finalTargets[intersect(childLimmaRes_vsCNO_ANOVA_Condition_Dresden_date_sig$PG_ID, finalTargets$Protein),]
+
+# Overlap all proteins
+length(intersect(childLimmaRes_vsCNO_ANOVA_Condition_sig$PG_ID, 
+                 childLimmaRes_vsCNO_ANOVA_trainTest[childLimmaRes_vsCNO_ANOVA_trainTest$adj.P.Val < 0.05,]$PG_ID))
+
+# Chcek between date adjusted and non-date adjusted
+## What is in the non date-adjusted that is not in the date adjusted set?
+setdiff(childLimmaRes_vsCNO_ANOVA_Condition_sig$PG_ID,
+        childLimmaRes_vsCNO_ANOVA_Condition_date_sig$PG_ID)
+## What is in date-adjusted that is not in the non-date adjusted?
+setdiff(childLimmaRes_vsCNO_ANOVA_Condition_date_sig$PG_ID,
+        childLimmaRes_vsCNO_ANOVA_Condition_sig$PG_ID)
+
+```
+
+#### Pairwise tests
+
+```{r}
+
+# Loop over possible contratss
+allPW_limmaRes <- data.frame()
+for (contrastName in colnames(childValid_contrastM)) {
+
+  # Test
+  limmaRes <- runLimma(qntTableNorm[commonProts,rownames(childValidDesign_noInt)], 
+                       designM=childValidDesign_noInt,  
+                       levels2Test=contrastName,
+                       contrasts2Fit=childValid_contrastM)
+  limmaRes["CONTRAST"] <- contrastName
+  allPW_limmaRes <- rbind(allPW_limmaRes, limmaRes)
+  
+}
+iohPW_limmaRes <- data.frame()
+for (contrastName in colnames(childValid_contrastM_CNOvsIOH)) {
+
+  # Test
+  limmaRes <- runLimma(qntTableNorm[commonProts,rownames(childValidDesign_noInt)], 
+                       designM=childValidDesign_noInt,  
+                       levels2Test=contrastName,
+                       contrasts2Fit=childValid_contrastM_CNOvsIOH)
+  limmaRes["CONTRAST"] <- contrastName
+  iohPW_limmaRes <- rbind(iohPW_limmaRes, limmaRes)
+  
+}
+
+# Enumerate hits
+## Padj
+nConsistentProts_allPW_padj <- c(table(allPW_limmaRes[allPW_limmaRes$adj.P.Val < candidatePThr,]$PG_ID))
+nConsistentProts_iohPW_padj <- c(table(iohPW_limmaRes[iohPW_limmaRes$adj.P.Val < candidatePThr,]$PG_ID))
+consitentProts_allPW_padj <- names(nConsistentProts_allPW_padj[nConsistentProts_allPW_padj == ncol(childValid_contrastM)])
+consitentProts_iohPW_padj <- names(nConsistentProts_iohPW_padj[nConsistentProts_iohPW_padj == ncol(childValid_contrastM_CNOvsIOH)])
+
+## PVal
+nConsistentProts_allPW_pval <- c(table(allPW_limmaRes[allPW_limmaRes$P.Value < candidatePThr,]$PG_ID))
+nConsistentProts_iohPW_pval <- c(table(iohPW_limmaRes[iohPW_limmaRes$P.Value < candidatePThr,]$PG_ID))
+consitentProts_allPW_pval <- names(nConsistentProts_allPW_pval[nConsistentProts_allPW_pval == ncol(childValid_contrastM)])
+consitentProts_iohPW_pval <- names(nConsistentProts_iohPW_pval[nConsistentProts_iohPW_pval == ncol(childValid_contrastM_CNOvsIOH)])
+
+```
+
+#### Add column indicating protein selected as a biomarker or not
+
+```{r}
+
+# Add label
+childLimmaRes_vsCNO_ANOVA_Condition_Dresden["SelectedProtein"] <- "No"
+childLimmaRes_vsCNO_ANOVA_Condition_Dresden[which(childLimmaRes_vsCNO_ANOVA_Condition_Dresden$PG_ID %in% commonProts),]["SelectedProtein"] <- "Yes"
+childLimmaRes_ANOVACondition_trainTest["SelectedProtein"] <- "No"
+childLimmaRes_ANOVACondition_trainTest[which(childLimmaRes_ANOVACondition_trainTest$PG_ID %in% commonProts),]["SelectedProtein"] <- "Yes"
+
+```
+
+#### Add protein names
+
+```{r}
+
+childLimmaRes_vsCNO_ANOVA_Condition_Dresden <- merge(finalTargets, 
+                                             childLimmaRes_vsCNO_ANOVA_Condition_Dresden,
+                                             by.x="Protein", by.y="PG_ID")
+childLimmaRes_vsCNO_ANOVA_trainTest <- merge(finalTargets, 
+                                             childLimmaRes_vsCNO_ANOVA_trainTest,
+                                             by.x="Protein", by.y="PG_ID")
+
+```
+
+#### Compare
+
+```{r}
+
+calcOrthoganolDist <- function(train, valid) {
+  
+  # Check if both vectors have the same length.
+  if (length(train) != length(valid)) {
+    stop("The 'train' and 'valid' vectors must be of equal length.")
+  }
+  
+  diffCalc <- function(x, y) { (x - y) - mean(x, y) }
+  
+  # Calculate the mean deviation
+  distance <- mapply(diffCalc, valid, train)
+  
+  # Return
+  return(distance)
+}
+
+# Get contrasts
+contrasts2Check <- colnames(childValid_contrastM)
+selectProts <- commonProts
+
+# Get data 
+colnames(childLimmaRes_vsCNO_ANOVA_Condition)[[1]] <- "Protein"
+validData <- childLimmaRes_vsCNO_ANOVA_Condition
+trainData <- childLimmaRes_vsCNO_ANOVA_trainTest
+rownames(validData) <- validData$Protein
+rownames(trainData) <- trainData$Protein
+
+# Generate output
+compareFCs <- data.frame()
+
+# Loop over
+for (i in seq_along(contrasts2Check)) {
+    
+    print(paste0("// Plotting FCs for ",contrasts2Check[[i]]))
+    
+    # Get FCs for validation and train/test data
+    validFC <- validData[contrasts2Check[[i]]]
+    trainFC <- trainData[contrasts2Check[[i]]]
+    rownames(validFC) <- validData$Protein
+    rownames(trainFC) <- trainData$Protein
+    
+    # Get common
+    consistentProts <- intersect(validData$Protein,
+                                 trainData$Protein)
+    
+    # Subset to common
+    validFC <- validFC[consistentProts,1]
+    trainFC <- trainFC[consistentProts,1]
+    
+    # Correlate - spearmans
+    corrVal <- cor(validFC, 
+                   trainFC, 
+                   use="pairwise.complete.obs", 
+                   method="spearman")
+    
+    # Get sig proteins
+    sigValidProts <- childLimmaRes_vsCNO_ANOVA_Condition[childLimmaRes_vsCNO_ANOVA_Condition$adj.P.Val < 0.05,]
+    rownames(childLimmaRes_vsCNO_ANOVA_Condition) <- childLimmaRes_vsCNO_ANOVA_Condition$Protein
+    consistentProtNames <- childLimmaRes_vsCNO_ANOVA_Condition[consistentProts,]$Protein
+    
+    # Plot
+    checkLabelProt <- consistentProts %in% sigValidProts$Protein & consistentProts %in% selectProts
+    toPlot <- data.frame(Protein=finalTargets[consistentProtNames,]$SYMBOL,
+                         SelectedProteins=factor(ifelse(consistentProts %in% selectProts, "Yes", "No"),
+                                                 levels=c("No", "Yes")),
+                         SigInValidation=factor(ifelse(checkLabelProt, "FDR < 0.05", "ns"),
+                                                levels=c("ns", "FDR < 0.05")),
+                         Validation=validFC,
+                         TrainTest=trainFC)
+    rownames(toPlot) <- consistentProts
+    toPlot <- toPlot[consistentProts,]
+    
+    # Add label
+    checkLabelProt[sign(toPlot$Validation) != sign(toPlot$TrainTest)] <- FALSE # If FC < 1
+    toPlot["LabelProtein"] <- ifelse(checkLabelProt, gsub(" .*","",toPlot$Protein), NA)
+    
+    # Calculate orthoganol distance
+    toPlot["OrthoDist"] <- NA
+    toPlot[toPlot$SelectedProteins == "Yes",]["OrthoDist"] <- calcOrthoganolDist(scale(toPlot[toPlot$SelectedProteins == "Yes",]$Validation, 
+                                                                                       center=TRUE, scale=TRUE),
+                                                                                 scale(toPlot[toPlot$SelectedProteins == "Yes",]$TrainTest, 
+                                                                                       center=TRUE, scale=TRUE))
+    
+    # Add to dataframe
+    compareFCs <- rbind(compareFCs,
+                        cbind(CONTRAST=contrasts2Check[[i]], 
+                              FacetLabel=contrasts2Check[[i]],
+                              toPlot))
+  
+}
+
+# Simplify protein name
+compareFCs["ProteinSimple"] <- gsub(" .*","",compareFCs$Protein)
+
+# Add if discovery/valid FC agree
+compareFCs["SignCheck"] <- "No"
+compareFCs[sign(compareFCs$Validation) == sign(compareFCs$TrainTest),]["SignCheck"] <- "Yes"
+
+# Replace 
+compareFCs["Condition"] <- gsub("CNOvs","",compareFCs$CONTRAST)
+compareFCs["Condition"] <- gsub("InfOsteo","InfOsteitis",compareFCs$Condition)
+compareFCs["Condition"] <- gsub("Onc","Oncology",compareFCs$Condition)
+compareFCs["FacetLabel"] <- gsub("CNOvs","",compareFCs$FacetLabel)
+compareFCs["FacetLabel"] <- gsub("InfOsteo","InfOsteitis",compareFCs$FacetLabel)
+compareFCs["FacetLabel"] <- gsub("Onc","Oncology",compareFCs$FacetLabel)
+
+```
+
+#### Plot scatterplot
+
+```{r, fig.height=5.25, fig.width=16}
+  
+# Get max value
+maxVal <- ceiling(base::max(abs(c(compareFCs$TrainTest, 
+                                  compareFCs$Validation))))
+  
+# Plot
+plt <- ggplot() +
+    geom_segment(data = compareFCs[compareFCs$SelectedProteins == "Yes",],
+                 mapping = aes(x = Validation,
+                               y = TrainTest,
+                               xend = (Validation + TrainTest) / 2,
+                               yend = (Validation + TrainTest) / 2),
+                 color = "darkgrey",
+                 # linetype = "dashed",
+                 size = 1,
+                 alpha = 0.7) +
+    geom_point(data=compareFCs,
+               mapping=aes(x=Validation, 
+                           y=TrainTest,
+                           size=SigInValidation),
+               alpha=0.65,
+               color="darkgrey") +
+    geom_point(data=compareFCs[compareFCs$SelectedProteins == "Yes",],
+               mapping=aes(x=Validation, 
+                           y=TrainTest,
+                           size=SigInValidation),
+               alpha=0,
+               shape=21,
+               fill="white") +
+    geom_point(data=compareFCs[compareFCs$SelectedProteins == "Yes",],
+               mapping=aes(x=Validation, 
+                           y=TrainTest,
+                           size=SigInValidation),
+               alpha=0.75,
+               shape=21,
+               fill="mediumblue") +
+    geom_vline(xintercept=0,
+               
+               color="darkgrey") +
+    geom_hline(yintercept=0,
+               
+               color="darkgrey") +
+    geom_abline(slope=1, 
+                intercept=0,
+                
+                color="darkred") +
+    geom_text_repel(data=compareFCs[compareFCs$Protein == "CRP",],
+                    mapping=aes(x=Validation, 
+                                y=TrainTest,
+                                label=LabelProtein),
+                    size=20,
+                    nudge_x=3,
+                    force=2.5,
+                    color="black",
+                    seed=1) +
+    facet_grid(cols=vars(FacetLabel)) +
+    scale_size_manual(values=c("ns"=2, 
+                               "FDR < 0.05"=8)) +
+    scale_fill_manual(values=c("ns"="darkgrey", 
+                               "FDR < 0.05"="mediumblue")) +
+    ylab("Discovery") + xlab("Validation") +
+    xlim(-maxVal, maxVal) +
+    ylim(-maxVal, maxVal) +
+    theme_classic(base_size=24) +
+    theme(legend.position="top",
+          legend.direction="horizontal",
+          legend.title.position="left",
+          legend.text=element_text(size=56),
+          legend.title=element_text(size=64),
+          axis.title=element_text(size=80),
+          axis.text=element_text(size=52),
+          strip.text=element_text(size=64))
+  
+# Save
+ggsave(here::here(resValidDir, "differentialAbundance",
+                  "differentialAbundance_discoveryVsValidation_justCRP.png"),
+       plt,
+       units="px",
+       width=10000,
+       height=3250)
+
+# Add to list
+newList <- list(plt)
+names(newList) <- c("diffAbundanceComparison_justCRP")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+#### Plot scatterplot excluding CRP
+
+```{r, fig.height=5.25, fig.width=16}
+  
+# Get max value
+maxVal <- 3
+  
+# Plot
+plt <- ggplot() +
+    geom_segment(data = compareFCs[compareFCs$SelectedProteins == "Yes" &
+                                   compareFCs$Protein != "CRP",],
+                 mapping = aes(x = Validation,
+                               y = TrainTest,
+                               xend = (Validation + TrainTest) / 2,
+                               yend = (Validation + TrainTest) / 2),
+                 color = "darkgrey",
+                 size = 1,
+                 alpha = 0.7) +
+    geom_point(data=compareFCs[compareFCs$Protein != "CRP",],
+               mapping=aes(x=Validation, 
+                           y=TrainTest,
+                           size=SigInValidation),
+               alpha=0.65,
+               color="darkgrey") +
+    geom_point(data=compareFCs[compareFCs$SelectedProteins == "Yes" &
+                               compareFCs$Protein != "CRP",],
+               mapping=aes(x=Validation, 
+                           y=TrainTest,
+                           size=SigInValidation),
+               shape=21,
+               fill="white") +
+    geom_point(data=compareFCs[compareFCs$SelectedProteins == "Yes" &
+                               compareFCs$Protein != "CRP",],
+               mapping=aes(x=Validation, 
+                           y=TrainTest,
+                           size=SigInValidation),
+               alpha=0.75,
+               shape=21,
+               fill="mediumblue") +
+    geom_vline(xintercept=0,
+               
+               color="darkgrey") +
+    geom_hline(yintercept=0,
+               
+               color="darkgrey") +
+    geom_abline(slope=1, 
+                intercept=0,
+                
+                color="darkred") +
+    geom_text_repel(data=compareFCs[compareFCs$Protein != "CRP",],
+                    mapping=aes(x=Validation, 
+                                y=TrainTest,
+                                label=LabelProtein),
+                    min.segment.length = unit(0, 'lines'),
+                    size=7.5,
+                    force=75,
+                    fill=NA,
+                    color="black",
+                    seed=7) +
+    facet_grid(cols=vars(FacetLabel)) +
+    scale_size_manual(values=c("ns"=2, 
+                               "FDR < 0.05"=8)) +
+    scale_fill_manual(values=c("ns"="darkgrey", 
+                               "FDR < 0.05"="mediumblue")) +
+    ylab("Discovery") + xlab("Validation") + 
+    labs(size="Significant") +
+    xlim(-maxVal, maxVal) +
+    ylim(-maxVal, maxVal) +
+    theme_classic(base_size=24) +
+    theme(legend.position="top",
+          legend.direction="horizontal",
+          legend.title.position="left",
+          legend.text=element_text(size=56),
+          legend.title=element_text(size=64),
+          axis.title=element_text(size=80),
+          axis.text=element_text(size=52),
+          strip.text=element_text(size=64))
+  
+# Save
+ggsave(here::here(resValidDir, "differentialAbundance",
+                  "differentialAbundance_discoveryVsValidation_allCandidatesLabelled.png"),
+       plt,
+       units="px",
+       width=10000,
+       height=3250)
+
+# Add to list
+newList <- list(plt)
+names(newList) <- c("diffAbundanceComparison_noCRP")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+
+#### Barbell plot of logFCs
+
+##### Modify data
+
+```{r}
+
+# Make CRP separate 
+compareFCs["CRP"] <- " "
+compareFCs[compareFCs$Protein == "CRP",]["CRP"] <- "CRP"
+
+# Plot
+compareFCs <- compareFCs[order(compareFCs$SigInValidation,
+                               decreasing=TRUE),]
+compareFCs$Protein <- factor(compareFCs$Protein,
+                             levels=unique(compareFCs$Protein))
+
+# Copy
+compareFCsCopy <- compareFCs
+
+# Make tall
+compareFCsTall <- reshape2::melt(compareFCsCopy,
+                                 id.vars=setdiff(colnames(compareFCsCopy),
+                                                 c("Validation", "TrainTest")))
+
+# Add significance flag
+compareFCsTall$SigInValidation <- as.character(compareFCsTall$SigInValidation)
+compareFCsTall[compareFCsTall$SigInValidation == "FDR < 0.05",]["SigInValidation"] <- "FDR < 0.05"
+compareFCsTall[compareFCsTall$SigInValidation == "ns",]["SigInValidation"] <- "ns"
+compareFCsTall$SigInValidation <- factor(compareFCsTall$SigInValidation,
+                                     levels=c("FDR < 0.05", "ns", " "))
+compareFCsCopy$SigInValidation <- factor(compareFCsCopy$SigInValidation,
+                                     levels=c("FDR < 0.05", "ns", " "))
+
+```
+
+#### Add signficance
+
+```{r}
+
+# Add significance flag
+compareFCs$SigInValidation <- as.character(compareFCs$SigInValidation)
+compareFCs[compareFCs$SigInValidation == "FDR < 0.05",]["SigInValidation"] <- "*"
+compareFCs[compareFCs$SigInValidation == "ns",]["SigInValidation"] <- " "
+compareFCs$SigInValidation <- factor(compareFCs$SigInValidation,
+                                     levels=c("*", " "))
+
+```
+
+
+```{r, fig.height=6, fig.width=18}
+
+ggplot(compareFCs,
+              aes(y = ProteinSimple,
+                  x = abs(OrthoDist),
+                  fill = Condition,
+                  pattern = SignCheck)) +
+  geom_col_pattern(
+    pattern_fill = "white",
+    pattern_colour = "white",
+    colour = "white"
+  ) +
+  geom_text(data = compareFCs,
+            mapping = aes(y = ProteinSimple,
+                          x = abs(OrthoDist) + 0.15,
+                          label = SigInValidation,
+                          size = SigInValidation),
+            vjust = 0.75,
+            alpha = 1) +
+  facet_grid(cols = vars(FacetLabel)) +
+  scale_pattern_manual(values = c("No" = "stripe", 
+                                  "Yes" = "none"),
+                       breaks = c("No", "Yes")) +
+   scale_fill_manual(values = condCols) +
+  scale_alpha_manual(values = c("Yes" = 1, 
+                                "No" = 0.35)) +
+  scale_size_manual(values = c(" " = 2, 
+                               "*" = 16)) +
+  ylab("Selected Protein") +
+  xlab("Scaled Distance") +
+  labs(fill = "Condition") +
+  scale_x_continuous(breaks = c(0, 2, 4),
+                     limits  = c(0, 4.5),
+                     labels  = c(0, 2, 4))
+
+
+```
+
+#### Calculate orthoganol distances
+
+```{r, fig.height=5.25, fig.width=16}
+
+# put pattern mapping at top-level
+plt <- ggplot(compareFCs[compareFCs$SelectedProteins == "Yes",],
+              aes(y = ProteinSimple,
+                  x = abs(OrthoDist),
+                  fill = Condition,
+                  pattern = SignCheck)) +
+  geom_col_pattern(
+    pattern_fill = "white",
+    pattern_colour = "white",
+    colour = "white"
+  ) +
+  geom_text(data = compareFCs,
+            mapping = aes(y = ProteinSimple,
+                          x = abs(OrthoDist) + 0.25,
+                          label = SigInValidation,
+                          size = SigInValidation),
+            vjust = 0.75,
+            alpha = 1) +
+  facet_grid(cols = vars(FacetLabel)) +
+  scale_pattern_manual(values = c("No" = "stripe", 
+                                  "Yes" = "none"),
+                       breaks = c("No", "Yes")) +
+  scale_fill_manual(values = condCols) +
+  scale_alpha_manual(values = c("Yes" = 1, "No" = 0.35)) +
+  scale_size_manual(values = c(" " = 2, "*" = 16)) +
+  ylab("Selected Protein") +
+  xlab("Scaled Distance") +
+  labs(fill = "Condition") +
+  scale_x_continuous(breaks = c(0, 2, 4),
+                     limits  = c(0, 4.5),
+                     labels  = c(0, 2, 4)) +
+  theme_classic(base_size = 24) +
+  theme(axis.title = element_text(size = 80),
+        axis.text = element_text(size = 56),
+        axis.text.x = element_text(size = 56),
+        axis.text.y = element_text(size = 42),
+        legend.text = element_text(size = 56),
+        legend.title = element_text(size = 64),
+        strip.text = element_text(size = 64),
+        legend.title.position = "left",
+        legend.position = "top",
+        legend.key.size = unit(3, "cm")) +
+  guides(
+  fill = guide_legend(nrow = 1, byRow = TRUE,
+                      override.aes = list(size = 30,
+                                          pattern="none")),
+  pattern = guide_legend(
+    override.aes = list(
+      pattern = c("stripe", "none"),
+      # for legend only: paint the stripe bands black so they are visible
+      pattern_fill   = c("white", NA),
+      # no border needed on stripe in legend
+      pattern_colour = c("white", NA),
+      # keep the legend box fill identical to what you used before
+      fill   = c("darkgrey", "darkgrey"),
+      colour = c(NA, NA)
+    )
+  ),
+  alpha = "none",
+  size = "none",
+  label = "none"
+)
+
+
+# Save
+ggsave(here::here(resValidDir, "differentialAbundance",
+                  "scaledOrthoganolDistance_ofCandidates_fromDiaganol.png"),
+       plt,
+       units="px",
+       width=10000,
+       height=6000)
+
+# Add to list
+newList <- list(plt)
+names(newList) <- c("diffAbundanceComparison_orthoganolDistance")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+##### Plot
+
+```{r, fig.height=24, fig.width=32}
+
+# Adjust colours
+condStudyCols <- condCols
+names(condStudyCols) <- paste0("Discovery.", names(condStudyCols))
+lightCols <- lighten(condCols, 0.65)
+names(lightCols) <- paste0("Validation.", names(lightCols))
+condStudyCols <- c(condStudyCols, lightCols)
+
+# Add in merged condition/variable
+compareFCsTall$variable <- gsub("TrainTest", "Discovery", compareFCsTall$variable)
+compareFCsTall["CondData"] <- paste(compareFCsTall$variable, compareFCsTall$Condition, sep=".")
+
+# Get min
+compareFCsAggr <- aggregate(as.formula(paste0("value ~ ", 
+                                              paste(setdiff(colnames(compareFCsTall),
+                                                            c("value", "CondData", "variable")),
+                                                    collapse=" + "))),
+                            data=compareFCsTall[compareFCsTall$SigInValidation != "ns",],
+                            FUN=base::min)
+
+p1 <- ggplot(compareFCsTall[compareFCsTall$Protein != "CRP",],
+       aes(x=value,
+           y=Protein,
+           shape=SignCheck,
+           fill=CondData)) +
+  geom_vline(xintercept=0,
+             linewidth=1,
+             color="darkgrey") +
+  geom_segment(data=compareFCsCopy[compareFCsCopy$Protein != "CRP",],
+               mapping=aes(x=Validation,
+                           xend=TrainTest,
+                           y=Protein,
+                           yend=Protein),
+               color="black",
+               linewidth=1.5,
+               inherit.aes=FALSE) +
+  geom_point(color="white",
+             fill="white",
+             alpha=1,
+             size=12) +
+  geom_point(stroke=1.5,
+             alpha=0.9,
+             size=12) +
+  scale_shape_manual(values=c("Yes"=21, 
+                              "No"=22)) +
+  scale_fill_manual(values=condStudyCols) +
+  facet_grid(cols=vars(Condition),
+             rows=vars(SigInValidation),
+             labeller = labeller(SigInValidation=c(No="ns",
+                                                   Yes="FDR < 0.05")),
+             scale="free",
+             space="free_y") +
+  scale_x_continuous(limits=c(-2.5, 2.5),
+                     breaks=c(-2, -1, 0, 1, 2)) +
+  theme_classic(base_size=52)
+
+# Plot
+compareFCsTall$variable <- factor(compareFCsTall$variable,
+                                  levels=c("Discovery", "Validation"))
+p2 <- ggplot(compareFCsTall[compareFCsTall$Protein == "CRP",],
+       aes(x=value,
+           y=Protein,
+           fill=CondData,
+           shape=SignCheck)) +
+  geom_vline(xintercept=0,
+             
+             linewidth=1,
+             color="darkgrey") +
+  geom_segment(data=compareFCsCopy[compareFCsCopy$Protein == "CRP",],
+               mapping=aes(x=Validation,
+                           xend=TrainTest,
+                           y=Protein,
+                           yend=Protein),
+               color="black",
+               linewidth=1.5,
+               inherit.aes=FALSE) +
+  geom_point(color="white",
+             fill="white",
+             alpha=1,
+             size=12) +
+  geom_point(stroke=1.5,
+             alpha=0.9,
+             size=12) +
+  scale_shape_manual(values=c("Yes"=21, 
+                              "No"=22)) +
+  scale_fill_manual(values=condStudyCols) +
+  facet_grid(cols=vars(Condition),
+             scale="free_y",
+             space="free_y") +
+  scale_x_continuous(limits=c(-10.5, 2),
+                     breaks=seq(-9, 2, 3),
+                     labels=seq(-9, 2, 3)) +
+  theme_classic(base_size=52)
+
+# Combine
+p1 + p2 + 
+  plot_layout(heights=c(1, 0.05),
+              guides="collect",
+              axis_titles="collect_x") &
+  guides(alpha=guide_legend(override.aes=list(shape=21)),
+         fill=guide_legend(override.aes=list(shape=21)))
+
+# Add to list
+newList <- list(p1,
+                p2)
+names(newList) <- c("barbellPlot_logFC_discoVsValid",
+                    "barbellPlot_logFC_discoVsValid_justCRP")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+
+#### Save
+
+```{r}
+
+# Output
+dir.create(here::here(resDir, "crossSectional", "validation","differentialAbundance"),
+           recursive=TRUE)
+
+# Save
+write.table(childLimmaRes_vsCNO_ANOVA_Condition,
+            here::here(resDir, "crossSectional", "validation", "differentialAbundance",
+                       "limmaResults_ANOVA_wrtCNOvContrasts_validationData.tsv"), sep="\t", quote=FALSE, row.names=FALSE) 
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "14_validationDataDiffAbundance_figs.rds"))
+
+```
+
+
+
+

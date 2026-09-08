@@ -1,0 +1,1320 @@
+---
+title: "Biological Contextualisation"
+author: "Euan McDonnell"
+format: html
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source parameters, functions and install packages
+if (!require(here)) { install.packages("here") }
+here::i_am("16_biologicalContextualisation.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+# Metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata_filtered.R"))
+
+# Source colours
+source(here::here("params", "colors.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Read in validation directory
+validResDir <- readRDS(here::here("params", 
+                                  paste0("validationAnalysis_outputDirectory_",imputMethod,".rds")))
+ 
+```
+
+### Read in sig protein sets
+
+```{r}
+
+# Read in differential protein sets
+allProtSets <- readRDS(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance", 
+                       paste0("chosenProteins_featureSelection_pThr",as.character(candidatePThr),"_treatLog2Thr",as.character(log2ThrVal),".rds")))
+
+```
+
+### Read in 
+
+```{r}
+
+# read in 
+childLimmaRes_vsCNO_ANOVA_Condition <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                             "limmaResults_ANOVA_wrtCNOvContrasts_crossSectionalData.tsv"), sep="\t", header=TRUE)
+childLimmaRes_vsCNO_ANOVA_Condition_dresden <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance",
+                                                                     "limmaResults_ANOVA_wrtCNOvContrasts_crossSectionalData.tsv"), sep="\t", header=TRUE)
+sigRes <- list(AllSig=childLimmaRes_vsCNO_ANOVA_Condition,
+               DresdenOnly=childLimmaRes_vsCNO_ANOVA_Condition_dresden)
+
+```
+
+### Load data
+
+#### Abundance data
+
+```{r}
+
+# Read in cyclic Loess-normalised data
+quantTable_allSamples <- read.table(here::here(diaDir, "normalised", 
+                                    "metaCrossSectional_NormalyzerDE_byCondition", "CycLoess-normalized.txt"), sep="\t", header=TRUE, row.names=1)
+
+# Chosen imputed data
+quantTable_chosenMethod <- read.table(here::here(impDir, paste0("quantTable_imputedWithbPCA.tsv")), sep="\t", header=TRUE, row.names=1)
+
+# Match metadata
+trainMetaData <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "biomarkers",
+                                       "allSamplesMetadata_takenForSelection.tsv"), sep="\t", header=TRUE)
+trainQuantTable <- quantTable_allSamples[,trainMetaData$Sample_ID]
+
+# Get common
+quantTable <- quantTable_allSamples[,trainMetaData$Sample_ID]
+
+# Keep only selected metadata
+quantTable <- quantTable[,!grepl("QC",colnames(quantTable))]
+quantTable_noMissing <- quantTable[!is.na(rowSums(quantTable)),]
+
+```
+
+#### Read in desired proteins
+
+```{r}
+
+# Read in chosen proteins
+finalTargets <- read.table(here::here(validResDir,
+                                      paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,".tsv")), 
+                           sep="\t", 
+                           header=TRUE)
+rownames(finalTargets) <- finalTargets$Protein
+
+```
+
+#### Get FCs wrt Healthy for target proteins
+
+```{r}
+
+# Get targets
+finalTargets_vsHealthy <- merge(finalTargets[,c("Protein",
+                                                "SYMBOL",
+                                                "GENENAME")], 
+                                childLimmaRes_vsCNO_ANOVA_Condition[,c("PG_ID",
+                                                                       "CNOvsHealthy")],
+                                by.x="Protein",
+                                by.y="PG_ID")
+colnames(finalTargets_vsHealthy) <- c("Uniprot ID", 
+                                      "Gene Symbol",
+                                      "Gene Name",
+                                      "LogFC (CNO vs Healthy)")
+write.table(finalTargets_vsHealthy,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_logFC_CNOvsHealthy.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+
+```
+
+## Main
+
+### Functional enrichment analysis
+
+#### Read in pathways
+
+### Functional enrichment analysis
+
+#### Get universe as entrez ID
+
+```{r}
+
+# Get annotations
+background <- AnnotationDbi::select(org.Hs.eg.db,
+                                   keys=rownames(quantTable_allSamples),
+                                   keytype="UNIPROT",
+                                   columns=c("ENTREZID",
+                                             "SYMBOL"))
+backgroundList <- unique(as.character(background$UNIPROT[!is.na(background$UNIPROT)]))
+length(backgroundList)
+
+```
+
+#### Read in pathways
+
+```{r}
+
+# Read in reactome pathways
+reacPaths <- clusterProfiler::read.gmt(here::here(baseDataDir, "annotation", "ontology", "c2.cp.reactome.v2024.1.Hs.entrez.gmt"))
+keggPaths <- clusterProfiler::read.gmt(here::here(baseDataDir, "annotation", "ontology", "c2.cp.kegg_medicus.v2024.1.Hs.entrez.gmt"))
+gobpPaths <- clusterProfiler::read.gmt(here::here(baseDataDir, "annotation", "ontology", "c5.go.bp.v2024.1.Hs.entrez.gmt"))
+
+# Add Uniprot IDs
+reacPathData <- merge(reacPaths, background, by.x="gene", by.y="ENTREZID")
+keggPathData <- merge(keggPaths, background, by.x="gene", by.y="ENTREZID")
+gobpPathData <- merge(gobpPaths, background, by.x="gene", by.y="ENTREZID")
+
+# Make list
+reacPaths <- lapply(split(reacPathData[,-1]$UNIPROT, reacPathData[,-1]$term),function(x) c(x))
+keggPaths <- lapply(split(keggPathData[,-1]$UNIPROT, keggPathData[,-1]$term),function(x) c(x))
+gobpPaths <- lapply(split(gobpPathData[,-1]$UNIPROT, gobpPathData[,-1]$term),function(x) c(x))
+names(reacPaths) <- mgsub(names(reacPaths), c("REACTOME_", "_"), c("", " "))
+names(keggPaths) <- mgsub(names(keggPaths), c("KEGG_", "_"), c("", " "))
+names(gobpPaths) <- mgsub(names(gobpPaths), c("GOBP_", "_"), c("", " "))
+
+# Remove caes with none
+reacPaths <- reacPaths[sapply(reacPaths, function(term) length(term) > 0)]
+keggPaths <- keggPaths[sapply(keggPaths, function(term) length(term) > 0)]
+gobpPaths <- gobpPaths[sapply(gobpPaths, function(term) length(term) > 0)]
+
+```
+
+#### Annotate proteins to terms
+
+This is to just save as a table.
+
+```{r}
+
+# Combine
+finalTargetsReac <- merge(finalTargets,
+                          reacPathData,
+                          by.x="ENTREZID",
+                          by.y="gene")
+finalTargetsKegg <- merge(finalTargets,
+                          keggPathData,
+                          by.x="ENTREZID",
+                          by.y="gene")
+finalTargetsGobp <- merge(finalTargets,
+                          gobpPathData,
+                          by.x="ENTREZID",
+                          by.y="gene")
+
+# Check coverage
+length(unique(finalTargetsReac$Protein))
+length(unique(finalTargetsKegg$Protein))
+length(unique(finalTargetsGobp$Protein))
+
+# Save
+write.table(finalTargets,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,".tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+write.table(finalTargetsReac,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,"_allAnnotatedReactomePathways.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+write.table(finalTargetsKegg,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,"_allAnnotatedKeggPathways.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+write.table(finalTargetsGobp,
+            here::here("results", "final", "crossSectional",
+                       paste0("finalTargetProteins_withValidationAnnotation_imputedBy",imputMethod,"_allAnnotatedGoBP.tsv")),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+
+```
+
+#### Perform tests
+
+```{r}
+
+
+getSetGenes <- function(pathData,
+                        background) {
+
+  # Loop over
+  pathData["overlapGeneNames"] <- NA
+  pathData["overlapUniprotIDs"] <- NA
+  for (i in seq_len(nrow(pathData))) {
+
+    # Get 
+    uniProtIDs <- unlist(pathData[i,]$overlapGenes)
+    geneIDs <- background[which(background$UNIPROT %in% uniProtIDs),]$SYMBOL
+    
+    # Add
+    pathData[i,]["overlapGeneNames"] <- paste(geneIDs,
+                                          collapse=", ")
+    pathData[i,]["overlapUniprotIDs"] <- paste(uniProtIDs,
+                                               collapse=", ")
+
+  }
+
+  # Return
+  return(pathData[,-7])
+
+}
+
+
+```
+
+##### Differentially abundant proteins
+
+```{r}
+
+# Loop over protein sets
+protSets2Test <- c("AllSig", "DresdenOnly")
+for (protSet in protSets2Test) {
+  
+  print(protSet)
+  
+  # Get prots as entrezid
+  testProts <- allProtSets$limma$padj[[protSet]]
+  
+  # Enrichment test
+  reacRes <- as.data.frame(fgsea::fora(reacPaths,
+                         genes=testProts,
+                         universe=intersect(backgroundList, 
+                                            backgroundList),
+                         minSize=10))
+  print(reacRes[reacRes$padj < 0.05,])
+  keggRes <- as.data.frame(fgsea::fora(keggPaths,
+                         genes=testProts,
+                         universe=intersect(backgroundList, 
+                                            backgroundList),
+                         minSize=10))
+  print(keggRes[keggRes$padj < 0.05,])
+  gobpRes <- as.data.frame(fgsea::fora(gobpPaths,
+                         genes=testProts,
+                         universe=intersect(backgroundList, 
+                                            backgroundList),
+                         minSize=10))
+  print(gobpRes[gobpRes$padj < 0.05,])
+  
+  if (nrow(reacRes[reacRes$padj < 0.05,]) > 0) {
+  
+    # Save
+    write.table(getSetGenes(reacRes[reacRes$padj < 0.05,],
+                            background),
+                here::here("results", "final", "crossSectional", 
+                           paste0(protSet, "_OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.tsv")),
+                sep="\t",
+                quote=FALSE,
+                row.names=FALSE)
+    write.xlsx(getSetGenes(reacRes[reacRes$padj < 0.05,],
+                            background),
+                here::here("results", "final", "crossSectional", 
+                           paste0(protSet, "_OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.xlsx")))
+    
+  }
+  
+  if (nrow(keggRes[keggRes$padj < 0.05,]) > 0) {
+    
+    write.table(getSetGenes(keggRes[keggRes$padj < 0.05,],
+                            background),
+                here::here("results", "final", "crossSectional", 
+                           paste0(protSet, "_OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.tsv")),
+                sep="\t",
+                quote=FALSE,
+                row.names=FALSE)
+    write.xlsx(getSetGenes(keggRes[keggRes$padj < 0.05,],
+                            background),
+                here::here("results", "final", "crossSectional", 
+                           paste0(protSet, "_OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.xlsx")))
+    
+  }
+  
+  if (nrow(gobpRes[gobpRes$padj < 0.05,]) > 0) {
+    
+    
+    write.table(getSetGenes(gobpRes[gobpRes$padj < 0.05,],
+                            background),
+                here::here("results", "final", "crossSectional", 
+                           paste0(protSet, "_OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.tsv")),
+                sep="\t",
+                quote=FALSE,
+                row.names=FALSE)
+    write.xlsx(getSetGenes(gobpRes[gobpRes$padj < 0.05,],
+                            background),
+                here::here("results", "final", "crossSectional", 
+                           paste0(protSet, "_OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.xlsx")))
+    
+  }
+  
+}
+
+```
+
+##### CNO vs all other conditions
+
+The idea here is to see how proteins are dysregulated in CNO relative to other conditions (as the baseline) and enrich for up- or down-regulation.
+
+```{r, fig.height=8. fig.width=8}
+
+# Make design
+rownames(trainMetaData) <- trainMetaData$Sample_ID
+childCrossDesign_noInt <- model.matrix(~ 0 + Condition + Z_Age + Sex + PLATE, 
+                                       data=trainMetaData)
+
+# Loop over conditions
+nonCNO <- c("Healthy",
+            "Crohn",
+            "InfOsteitis",
+            "Oncology")
+allToReturn <- vector(mode="list",
+                      length=length(nonCNO))
+for (i in seq_along(nonCNO)) {
+  
+  # Create contrast
+  x <- nonCNO[[i]]
+  childCross_contrastM_vsOtherCond <- makeContrasts(CNOvsOtherCond = paste0("ConditionCNO-Condition",x),
+                                                    levels=childCrossDesign_noInt)
+    
+  # Re-run with date
+  limmaRes_cnoOtherCond <- runLimma(trainQuantTable[,rownames(childCrossDesign_noInt)],
+                                    designM=childCrossDesign_noInt,  
+                                    levels2Test=paste0("ConditionCNO-Condition",x),
+                                    contrasts2Fit=childCross_contrastM_vsOtherCond)
+  limmaRes_cnoOtherCond_sig <- limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05,]
+  print(nrow(limmaRes_cnoOtherCond_sig))
+  
+  # Enrichment test
+  reacResUp <- as.data.frame(fgsea::fora(reacPaths,
+                        genes=limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05 & limmaRes_cnoOtherCond$logFC > 0,]$PG_ID,
+                        universe=intersect(backgroundList, 
+                                           backgroundList),
+                        minSize=10))
+  keggResUp <- as.data.frame(fgsea::fora(keggPaths,
+                        genes=limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05 & limmaRes_cnoOtherCond$logFC > 0,]$PG_ID,
+                        universe=intersect(backgroundList, 
+                                           backgroundList),
+                        minSize=10))
+  gobpResUp <- as.data.frame(fgsea::fora(gobpPaths,
+                        genes=limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05 & limmaRes_cnoOtherCond$logFC > 0,]$PG_ID,
+                        universe=intersect(backgroundList, 
+                                           backgroundList),
+                        minSize=10))
+  
+  reacResDn <- as.data.frame(fgsea::fora(reacPaths,
+                        genes=limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05 & limmaRes_cnoOtherCond$logFC < 0,]$PG_ID,
+                        universe=intersect(backgroundList, 
+                                           backgroundList),
+                        minSize=10))
+  keggResDn <- as.data.frame(fgsea::fora(keggPaths,
+                        genes=limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05 & limmaRes_cnoOtherCond$logFC < 0,]$PG_ID,
+                        universe=intersect(backgroundList, 
+                                           backgroundList),
+                        minSize=10))
+  gobpResDn <- as.data.frame(fgsea::fora(gobpPaths,
+                        genes=limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05 & limmaRes_cnoOtherCond$logFC < 0,]$PG_ID,
+                        universe=intersect(backgroundList, 
+                                           backgroundList),
+                        minSize=10))
+  
+  reacResUp["Condition"] <- nonCNO[[i]]
+  keggResUp["Condition"] <- nonCNO[[i]]
+  gobpResUp["Condition"] <- nonCNO[[i]]
+  reacResDn["Condition"] <- nonCNO[[i]]
+  keggResDn["Condition"] <- nonCNO[[i]]
+  gobpResDn["Condition"] <- nonCNO[[i]]
+  
+  reacResUp["Direction"] <- "Up"
+  keggResUp["Direction"] <- "Up"
+  gobpResUp["Direction"] <- "Up"
+  reacResDn["Direction"] <- "Down"
+  keggResDn["Direction"] <- "Down"
+  gobpResDn["Direction"] <- "Down"
+  
+  # Combine
+  reacResUp <- getSetGenes(reacResUp,
+                           background)
+  keggResUp <- getSetGenes(keggResUp,
+                           background)
+  gobpResUp <- getSetGenes(gobpResUp,
+                           background)
+  
+  reacResDn <- getSetGenes(reacResDn,
+                           background)
+  keggResDn <- getSetGenes(keggResDn,
+                           background)
+  gobpResDn <- getSetGenes(gobpResDn,
+                           background)
+  
+  # Add database
+  reacResUp["Database"] <- "Reactome"
+  keggResUp["Database"] <- "KEGG"
+  gobpResUp["Database"] <- "GO BP"
+  reacResDn["Database"] <- "Reactome"
+  keggResDn["Database"] <- "KEGG"
+  gobpResDn["Database"] <- "GO BP"
+  
+  # Save
+  write.table(reacResUp[reacResUp$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.tsv")),
+              sep="\t",
+              quote=FALSE,
+              row.names=FALSE)
+  write.table(keggResUp[keggResUp$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentKEGG_sigPadj0.05_logFCUp.tsv")),
+              sep="\t",
+              quote=FALSE,
+              row.names=FALSE)
+  write.table(gobpResUp[gobpResUp$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentGOBP_sigPadj0.05_logFCUp.tsv")),
+              sep="\t",
+              quote=FALSE,
+              row.names=FALSE)
+  
+  write.table(reacResDn[reacResDn$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCDown.tsv")),
+              sep="\t",
+              quote=FALSE,
+              row.names=FALSE)
+  write.table(keggResDn[keggResDn$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentKEGG_sigPadj0.05_logFCDown.tsv")),
+              sep="\t",
+              quote=FALSE,
+              row.names=FALSE)
+  write.table(gobpResDn[gobpResDn$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentGOBP_sigPadj0.05_logFCDown.tsv")),
+              sep="\t",
+              quote=FALSE,
+              row.names=FALSE)
+  
+  # Save excel
+  write.xlsx(reacResUp[reacResUp$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCUp.xlsx")))
+  write.xlsx(keggResUp[keggResUp$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentKEGG_sigPadj0.05_logFCUp.xlsx")))
+  write.xlsx(gobpResUp[gobpResUp$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentGOBP_sigPadj0.05_logFCUp.xlsx")))
+  
+  write.xlsx(reacResDn[reacResDn$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentReactome_sigPadj0.05_logFCDown.xlsx")))
+  write.xlsx(keggResDn[keggResDn$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentKEGG_sigPadj0.05_logFCDown.xlsx")))
+  write.xlsx(gobpResDn[gobpResDn$padj < 0.05,],
+              here::here("results", "final", "crossSectional", 
+                         paste0("CNOvs",nonCNO[[i]],"OnAllProteins_foraEnrichmentGOBP_sigPadj0.05_logFCDown.xlsx")))
+  
+  # C
+  allRes <- do.call("rbind",
+                    list(reacResUp[reacResUp$padj < 0.05,],
+                         # keggResUp[keggResUp$padj < 0.05,],
+                         # gobpResUp[gobpResUp$padj < 0.05,],
+                         reacResDn[reacResDn$padj < 0.05,] #,
+                         # keggResDn[keggResDn$padj < 0.05,],
+                         # gobpResDn[gobpResDn$padj < 0.05,]
+                         ))
+  allRes <- data.frame(allRes)
+  rownames(allRes) <- NULL
+  print(allRes[,c(7,8,1,3,4)])
+  
+  allToReturn[[i]] <- allRes
+  
+}
+
+```
+
+
+```{r, fig.height=7.5, fig.width=8}
+
+# Plot
+allToReturn |>
+  bind_rows()|>
+  filter(Direction == "Up") |>
+  mutate(pathway = mgsub(pathway,
+                         c("FACTOR IGF",
+                           "FACTOR BINDING"),
+                         c("FACTOR\nIGF",
+                           "\nFACTOR BINDING"))) |>
+  ggplot(aes(x=padj,
+             y=reorder(pathway,
+                       padj))) +
+    geom_bar(stat="identity",
+             fill="firebrick") +
+    labs(x="Adjusted P-Value",
+         y="") +
+    facet_grid(rows=vars(Condition),
+               cols=vars(Direction),
+               scale="free_y",
+               space="free_y") +
+    theme_classic() +
+    theme(strip.text.y = element_text(angle = 0))
+
+```
+
+```{r, fig.height=7.5, fig.width=6}
+
+allToReturn |>
+  bind_rows()|>
+  filter(Direction == "Down") |>
+  mutate(pathway = mgsub(pathway,
+                         c("FACTOR IGF",
+                           "FACTOR BINDING"),
+                         c("FACTOR\nIGF",
+                           "\nFACTOR BINDING"))) |>
+  ggplot(aes(x=padj,
+             y=reorder(pathway,
+                       padj))) +
+    geom_bar(stat="identity",
+             fill="mediumblue") +
+    labs(x="Adjusted P-Value",
+         y="") +
+    facet_grid(rows=vars(Condition),
+               cols=vars(Direction),
+               scale="free_y",
+               space="free_y") +
+    theme_classic() +
+    theme(strip.text.y = element_text(angle = 0))
+
+
+```
+
+##### All candidates
+
+```{r}
+
+# Enrichment test
+reacRes <- as.data.frame(fgsea::fora(reacPaths,
+                                  genes=finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                  universe=backgroundList,
+                                  minSize=10))
+keggRes <- as.data.frame(fgsea::fora(keggPaths,
+                                  genes=finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                  universe=backgroundList,
+                                  minSize=2))
+gobpRes <- as.data.frame(fgsea::fora(gobpPaths,
+                                  genes=finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                  universe=backgroundList,
+                                  minSize=10))
+reacRes[reacRes$padj < 0.05,]
+keggRes[keggRes$padj < 0.05,]
+gobpRes[gobpRes$padj < 0.05,]
+
+```
+
+##### Up CNO vs other conditions
+
+```{r}
+
+for (i in seq_along(nonCNO)) {
+  
+  # Model matrix
+  childCrossDesign_noInt <- model.matrix(~ 0 + Condition + Z_Age + Sex + PLATE, 
+                                         data=trainMetaData[which(trainMetaData$Condition %in% c("CNO", nonCNO[[i]])),])
+
+  # Create contrast
+  x <- nonCNO[[i]]
+  childCross_contrastM_vsOtherCond <- makeContrasts(CNOvsOtherCond = paste0("ConditionCNO-Condition",x),
+                                                    levels=childCrossDesign_noInt)
+    
+  # Re-run with date
+  limmaRes_cnoOtherCond <- runLimma(trainQuantTable[,rownames(childCrossDesign_noInt)],
+                                    designM=childCrossDesign_noInt,  
+                                    levels2Test=paste0("ConditionCNO-Condition",x),
+                                    contrasts2Fit=childCross_contrastM_vsOtherCond)
+  limmaRes_cnoOtherCond_sig <- limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$adj.P.Val < 0.05,]
+
+  # Enrichment test
+  reacResUp <- as.data.frame(fgsea::fora(reacPaths,
+                                    genes=intersect(finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                                    limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$logFC > 0,]$PG_ID),
+                                    universe=backgroundList,
+                                    minSize=10))
+  keggResUp <- as.data.frame(fgsea::fora(keggPaths,
+                                    genes=intersect(finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                                    limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$logFC > 0,]$PG_ID),
+                                    universe=backgroundList,
+                                    minSize=2))
+  gobpResUp <- as.data.frame(fgsea::fora(gobpPaths,
+                                    genes=intersect(finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                                    limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$logFC > 0,]$PG_ID),
+                                    universe=backgroundList,
+                                    minSize=10))
+
+  # Combine
+  reacResUp <- getSetGenes(reacResUp,
+                           background)
+  keggResUp <- getSetGenes(keggResUp,
+                           background)
+  gobpResUp <- getSetGenes(gobpResUp,
+                           background)
+  
+  reacResUp["Condition"] <- nonCNO[[i]]
+  keggResUp["Condition"] <- nonCNO[[i]]
+  gobpResUp["Condition"] <- nonCNO[[i]]
+  
+  reacResUp["Direction"] <- "Up"
+  keggResUp["Direction"] <- "Up"
+  gobpResUp["Direction"] <- "Up"
+  
+  # C
+  allRes <- do.call("rbind",
+                    list(reacResUp[reacResUp$padj < 0.05,],
+                         keggResUp[keggResUp$padj < 0.05,],
+                         gobpResUp[gobpResUp$padj < 0.05,]))
+  allRes <- data.frame(allRes)
+  rownames(allRes) <- NULL
+  print(allRes[,c(7,8,1,3,4)])
+  
+  if (nrow(allRes[allRes$padj < 0.05,]) > 0) {
+  
+    # Save
+    write.table(allRes[allRes$padj < 0.05,],
+                here::here("results", "final", "crossSectional",
+                           paste0("multiModalCandidates_foraEnrichment_upRegProts_inCNOvs",nonCNO[[i]],"_sigFDR0.05.tsv")),
+                sep="\t",
+                quote=FALSE,
+                row.names=FALSE)
+    write.xlsx(allRes[allRes$padj < 0.05,],
+                here::here("results", "final", "crossSectional",
+                           paste0("multiModalCandidates_foraEnrichment_upRegProts_inCNOvs",nonCNO[[i]],"_sigFDR0.05.xlsx")))
+ 
+  }
+  
+}
+
+```
+
+##### Down CNO vs other conditions
+
+```{r}
+
+for (i in seq_along(rev(nonCNO))) {
+  
+  # Model matrix
+  childCrossDesign_noInt <- model.matrix(~ 0 + Condition + Z_Age + Sex + PLATE, 
+                                         data=trainMetaData[which(trainMetaData$Condition %in% c("CNO", nonCNO[[i]])),])
+  
+  # Create contrast
+  x <- nonCNO[[i]]
+  childCross_contrastM_vsOtherCond <- makeContrasts(CNOvsOtherCond = paste0("ConditionCNO-Condition",x),
+                                                    levels=childCrossDesign_noInt)
+    
+  # Re-run with date
+  limmaRes_cnoOtherCond <- runLimma(trainQuantTable[,rownames(childCrossDesign_noInt)],
+                                    designM=childCrossDesign_noInt,  
+                                    levels2Test=paste0("ConditionCNO-Condition",x),
+                                    contrasts2Fit=childCross_contrastM_vsOtherCond)
+  limmaRes_cnoOtherCond_sig <- limmaRes_cnoOtherCond # [limmaRes_cnoOtherCond$adj.P.Val < 0.05,]
+
+  # Enrichment test
+  reacResDn <- as.data.frame(fgsea::fora(reacPaths,
+                                    genes=intersect(finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                                    limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$logFC < 0,]$PG_ID),
+                                    universe=backgroundList,
+                                    minSize=10))
+  keggResDn <- as.data.frame(fgsea::fora(keggPaths,
+                                    genes=intersect(finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                                    limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$logFC < 0,]$PG_ID),
+                                    universe=backgroundList,
+                                    minSize=2))
+  gobpResDn <- as.data.frame(fgsea::fora(gobpPaths,
+                                    genes=intersect(finalTargets[finalTargets$Model != "BiModal",]$Protein,
+                                                    limmaRes_cnoOtherCond[limmaRes_cnoOtherCond$logFC < 0,]$PG_ID),
+                                    universe=backgroundList,
+                                    minSize=10))
+
+  # Combine
+  reacResDn <- getSetGenes(reacResDn,
+                           background)
+  keggResDn <- getSetGenes(keggResDn,
+                           background)
+  gobpResDn <- getSetGenes(gobpResDn,
+                           background)
+  
+  reacResDn["Condition"] <- nonCNO[[i]]
+  keggResDn["Condition"] <- nonCNO[[i]]
+  gobpResDn["Condition"] <- nonCNO[[i]]
+  
+  reacResDn["Direction"] <- "Down"
+  keggResDn["Direction"] <- "Down"
+  gobpResDn["Direction"] <- "Down"
+  
+  # C
+  allRes <- do.call("rbind",
+                    list(reacResDn[reacResDn$padj < 0.05,],
+                         keggResDn[keggResDn$padj < 0.05,],
+                         gobpResDn[gobpResDn$padj < 0.05,]))
+  allRes <- data.frame(allRes)
+  rownames(allRes) <- NULL
+  print(allRes[,c(9,10,1,3,4)])
+  
+  if (nrow(allRes[allRes$padj < 0.05,]) > 0) {
+
+    # Save
+    write.table(allRes[allRes$padj < 0.05,],
+                here::here("results", "final", "crossSectional",
+                           paste0("multiModalCandidates_foraEnrichment_downRegProts_inCNOvs",nonCNO[[i]],"_sigFDR0.05.tsv")),
+                sep="\t",
+                quote=FALSE,
+                row.names=FALSE)
+    write.xlsx(allRes[allRes$padj < 0.05,],
+                here::here("results", "final", "crossSectional",
+                           paste0("multiModalCandidates_foraEnrichment_downRegProts_inCNOvs",nonCNO[[i]],"_sigFDR0.05.xlsx")))
+ 
+  }
+
+}
+
+```
+
+#### Plot
+
+```{r}
+
+# Get significant proteins
+sigProts <- strsplit(reacResDn[reacResDn$padj < 0.05,]$overlapUniprotIDs,
+                     split=", ")[[1]]
+
+# Get tall
+tallData <- reshape2::melt(as.matrix(quantTable_allSamples[sigProts,trainMetaData$Sample_ID]))
+tallData <- merge(trainMetaData,
+                  tallData,
+                  by.x="Sample_ID",
+                  by.y="Var2")
+
+tallData <- merge(tallData,
+                  background,
+                  by.x="Var1",
+                  by.y="UNIPROT")
+
+```
+
+Plot significant term protein abundances
+
+```{r}
+
+# Loop over healthy/oncology
+conds <- c("HealthyOncology")
+for (cond in conds) {
+
+  # Plot
+  p <- ggplot(tallData[which(tallData$Condition %in% c("CNO", "Healthy", "Oncology")),],
+         aes(x=interaction(SYMBOL,
+                           Condition),
+             y=value,
+             fill=Condition)) +
+    geom_boxplot(outlier.shape=NA,
+                 color="black",
+                 width=0.5) +
+    geom_point(position=position_jitterdodge(),
+               alpha=0.65,
+               show.legend=FALSE,
+               size=8) +
+    labs(x="Candidate Proteins Overlapping With\nReactome Term 'Initial Triggering of Complement'",
+         y="Log2 Abundance") +
+    facet_wrap(~ SYMBOL,
+               nrow=1,
+               scales="free",
+               space="free_x") +
+    scale_fill_manual(values=condCols) +
+    scale_color_manual(values=condCols) +
+    theme_classic(base_size=56) +
+    theme(plot.tag = element_text(face = "bold", 
+                                            size = 100),
+                    plot.title=element_text(size=100),
+                    axis.text.y=element_text(size=72),
+                    axis.text.x=element_blank(),
+                    axis.ticks.x=element_blank(),
+                    strip.text.x=element_text(size=84),
+                    axis.title=element_text(size=108),
+                    legend.text=element_text(size=84),
+                    legend.title=element_text(size=92),
+                    legend.position="top",
+                    legend.direction="vertical",
+                    legend.key.size = unit(9, "line")) &
+              guides(fill=guide_legend(override.aes=list(size=28),
+                                       nrow=1))
+  
+  # Save
+  ggsave(here::here(figDir, 
+                    paste0("figZZ_downRegCNOvsHealthyProts_sigReacPathwayProtss_abunancePlotted_justCNOvs",cond,".png")),
+         p,
+         width=15000,
+         height=5000,
+         units="px",
+         limitsize=FALSE)
+  ggsave(here::here(figDir,
+                    paste0("figZZ_downRegCNOvsHealthyProts_sigReacPathwayProtss_abunancePlotted_justCNOvs",cond,".pdf")),
+         p,
+         width=15000,
+         height=5000,
+         device="pdf",
+         units="px",
+         limitsize=FALSE)
+  
+}
+
+```
+
+```{r}
+
+# Plot
+p <- ggplot(tallData,
+       aes(x=interaction(SYMBOL,
+                         Condition),
+           y=value,
+           fill=Condition)) +
+  geom_boxplot(outlier.shape=NA,
+               color="black",
+               width=0.5) +
+  geom_point(position=position_jitterdodge(),
+             alpha=0.65,
+             show.legend=FALSE,
+             size=8) +
+  labs(x="Candidate Proteins Overlapping With\nReactome Term 'Initial Triggering of Complement'",
+       y="Log2 Abundance") +
+  facet_wrap(~ SYMBOL,
+             nrow=1,
+             scales="free",
+             space="free_x") +
+  scale_fill_manual(values=condCols) +
+  scale_color_manual(values=condCols) +
+  theme_classic(base_size=56) +
+  theme(plot.tag = element_text(face = "bold", 
+                                          size = 100),
+                  plot.title=element_text(size=100),
+                  axis.text.y=element_text(size=72),
+                  axis.text.x=element_blank(),
+                  axis.ticks.x=element_blank(),
+                  strip.text.x=element_text(size=84),
+                  axis.title=element_text(size=108),
+                  legend.text=element_text(size=84),
+                  legend.title=element_text(size=92),
+                  legend.position="top",
+                  legend.direction="vertical",
+                  legend.key.size = unit(9, "line")) &
+            guides(fill=guide_legend(override.aes=list(size=28),
+                                     nrow=1))
+
+# Save
+ggsave(here::here(figDir, 
+                  "figZZ_downRegCNOvsHealthyProts_sigReacPathwayProtss_abunancePlotted_allConditions.png"),
+       p,
+       width=15000,
+       height=6000,
+       limitsize = FALSE,
+       units="px")
+ggsave(here::here(figDir,
+                  "figZZ_downRegCNOvsHealthyProts_sigReacPathwayProtss_abunancePlotted_allConditions.pdf"),
+       p,
+       width=15000,
+       height=6000,
+       limitsize = FALSE,
+       device="pdf",
+       units="px")
+
+```
+
+#### Plot VNN1
+
+```{r, fig.height=7, fig.width=20}
+
+# Get tall
+tallData <- reshape2::melt(as.matrix(quantTable_allSamples["O95497",
+                                                           trainMetaData$Sample_ID]))
+tallData <- merge(trainMetaData,
+                  tallData,
+                  by.x="Sample_ID",
+                  by.y="Var2")
+tallData <- merge(tallData,
+                  background,
+                  by.x="Var1",
+                  by.y="UNIPROT")
+
+# Plot
+p <- ggplot(tallData,
+       aes(x=Condition,
+           y=value,
+           fill=Condition)) +
+  geom_boxplot(outlier.shape=NA,
+               color="black",
+               width=0.5) +
+  geom_point(position=position_jitterdodge(),
+             alpha=0.65,
+             show.legend=FALSE,
+             size=3) +
+  facet_grid(cols=vars(Sex)) +
+  labs(x="Condition",
+       y="Log2 VNN1\nAbundance") +
+  scale_fill_manual(values=condCols) +
+  theme_classic(base_size=32)
+
+p
+
+```
+
+### Networks
+
+#### STRING data
+
+##### Read in data
+
+```{r}
+
+# Read in String data
+stringData <- read.table(here::here("data", "base", "annotation", "9606.protein.links.v12.0.txt"), 
+                         sep=" ", 
+                         header=TRUE)
+colnames(stringData) <- c("Prot1", "Prot2", "Score")
+
+# Remove species name
+stringData$Prot1 <- gsub("9606[.]", "", stringData$Prot1)
+stringData$Prot2 <- gsub("9606[.]", "", stringData$Prot2)
+
+```
+
+##### Convert Uniprot IDs in Network to Entrez ID
+
+```{r}
+
+# Convert IDs
+termConversion <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db, 
+                                        keys=union(stringData$Prot1,
+                                                   stringData$Prot2),
+                                        keytype="ENSEMBLPROT",
+                                        columns=c("UNIPROT", "ENTREZID", "SYMBOL"))
+termConversion <- termConversion[which(termConversion$UNIPROT %in% rownames(quantTable_allSamples) |
+                                       termConversion$UNIPROT %in% rownames(quantTable_allSamples)),]
+
+# Replace
+stringData <- merge(stringData,
+                     termConversion,
+                     by.x="Prot1",
+                     by.y="ENSEMBLPROT")
+stringData <- merge(stringData,
+                     termConversion,
+                     by.x="Prot2",
+                     by.y="ENSEMBLPROT")
+
+# De-duplicate
+stringData_dedup <- stringData[!duplicated(stringData[,c("ENTREZID.x", "ENTREZID.y")]),]
+
+```
+
+##### Filter
+
+```{r}
+
+# View scores
+hist(stringData_dedup$Score)
+
+# Filter interactions
+stringData_dedup <- stringData_dedup[stringData_dedup$Score > 800,]
+
+```
+
+#### Make graph
+
+```{r}
+
+# Make igraph
+stringGraph <- igraph::graph_from_edgelist(as.matrix(stringData_dedup[,c("Prot1", "Prot2")]),
+                                           directed=FALSE)
+
+```
+
+### OmnipathR
+
+#### Load interaction databases
+
+```{r}
+
+# Get others
+omniPathPPI <- post_translational(organism="hsa")
+
+```
+
+#### Make network
+
+```{r}
+
+# Make igraph
+g <- graph_from_edgelist(as.matrix(omniPathPPI[,c(1,2)]),
+                         directed=TRUE)
+
+```
+
+#### Centrality
+
+##### Undirected
+
+```{r}
+
+# Calculate hubs and betweenness
+allNetHub <- hits_scores(g)
+allNetBetw <- betweenness(g)
+
+# Compare to out proteins
+candidProtHub <- allNetHub$hub[intersect(names(allNetHub$hub), 
+                                         finalTargets$Protein)]
+mean(allNetHub$hub[intersect(allDetectedProts, names(allNetHub$hub))])
+mean(candidProtHub)
+sort(candidProtHub)
+
+# Betweenness
+candidProtBetw <- allNetBetw[intersect(names(allNetBetw), 
+                                       finalTargets$Protein)]
+mean(allNetBetw[intersect(allDetectedProts, names(allNetHub$hub))])
+mean(candidProtBetw)
+sort(candidProtBetw)
+
+# Add to 
+finalTargets["Hubness"] <- NA
+finalTargets["Betweenness"] <- NA
+finalTargets[intersect(names(candidProtHub), finalTargets$Protein),]["Hubness"] <- candidProtHub
+finalTargets[intersect(names(candidProtBetw), finalTargets$Protein),]["Betweenness"] <- candidProtBetw
+
+# Correlate
+cor(finalTargets$Betweenness, 
+    finalTargets$MeanVarImp,
+    use="pairwise.complete.obs")
+cor(finalTargets$Hubness, 
+    finalTargets$MeanVarImp,
+    use="pairwise.complete.obs")
+
+```
+
+#### Network enrichment test
+
+NEAT method: https://link.springer.com/article/10.1186/s12859-016-1203-6#Sec2
+
+##### Convert Uniprot IDs in Network to Entrez ID
+
+```{r}
+
+# Convert IDs
+termConversion <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db, 
+                                        keys=union(omniPathPPI$source,
+                                                   omniPathPPI$target),
+                                        keytype="UNIPROT",
+                                        columns=c("UNIPROT", "ENTREZID", "SYMBOL"))
+
+# Replace
+omniPathPPI <- merge(omniPathPPI,
+                     termConversion,
+                     by.x="source",
+                     by.y="UNIPROT")
+omniPathPPI <- merge(omniPathPPI,
+                     termConversion,
+                     by.x="target",
+                     by.y="UNIPROT")
+
+# De-duplicate
+omniPathPPI_dedup <- omniPathPPI[!duplicated(omniPathPPI[,c("ENTREZID.x", "ENTREZID.y")]),]
+
+```
+
+##### Get network defined as only query proteins and those within 1 edge of them
+
+Keep only proteins in local neighbourhood of all detected proteins. Terms containing only these proteins are the only ones that could possibly be tested.
+
+```{r}
+
+# Restrict network to only those connected to desired terms
+omniPathPPI_1stDegreeAdj <- getNodeDistances(g, 
+                                             intersect(rownames(quantTable_allSamples), 
+                                                       V(g)$name),
+                                             V(g)$name)
+omniPathPPI_1stDegreeAdj[omniPathPPI_1stDegreeAdj > 1] <- 0
+omniPathPPI_1stDegreeAdj <- omniPathPPI_1stDegreeAdj[rowSums(omniPathPPI_1stDegreeAdj) > 0,
+                                                     colSums(omniPathPPI_1stDegreeAdj) > 0]
+
+# Make edgelist
+omniPathPPI_1stDegreeEdges <- reshape2::melt(omniPathPPI_1stDegreeAdj)
+omniPathPPI_1stDegreeEdges <- omniPathPPI_1stDegreeEdges[omniPathPPI_1stDegreeEdges$value > 0,c("Var1", "Var2")]
+
+# Convert IDs
+termConversion <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db, 
+                                        keys=union(omniPathPPI_1stDegreeEdges$Var1,
+                                                   omniPathPPI_1stDegreeEdges$Var2),
+                                        keytype="UNIPROT",
+                                        columns=c("UNIPROT", "ENTREZID", "SYMBOL"))
+
+# Replace
+omniPathPPI_1stDegreeEdges <- merge(omniPathPPI_1stDegreeEdges,
+                     termConversion,
+                     by.x="Var1",
+                     by.y="UNIPROT")
+omniPathPPI_1stDegreeEdges <- merge(omniPathPPI_1stDegreeEdges,
+                     termConversion,
+                     by.x="Var2",
+                     by.y="UNIPROT")
+
+# De-duplicate
+omniPathPPI_1stDegreeEdges_dedup <- omniPathPPI_1stDegreeEdges[!duplicated(omniPathPPI_1stDegreeEdges[,c("ENTREZID.x", "ENTREZID.y")]),]
+omniPathPPI_1stDegreeEdges_dedup <- omniPathPPI_1stDegreeEdges_dedup[!is.na(omniPathPPI_1stDegreeEdges_dedup$ENTREZID.x) &
+                                                                     !is.na(omniPathPPI_1stDegreeEdges_dedup$ENTREZID.y),]
+
+```
+
+##### Get proteins in the network
+
+```{r}
+
+# Get proteins detected
+detectedProts <- rownames(quantTable_allSamples)
+detectedProts <- intersect(detectedProts,
+                           union(omniPathPPI$source, omniPathPPI$target))
+
+# Subset network to only detected proteins
+omniPathPPI_detectedProts <- omniPathPPI[which(omniPathPPI$source %in% detectedProts &
+                                               omniPathPPI$target %in% detectedProts),]
+
+# Get proteins
+prots2Test <- union(omniPathPPI_detectedProts$ENTREZID.x,
+                    omniPathPPI_detectedProts$ENTREZID.y)
+prots2Test # THis is the background - needs to be proteins that were detected
+
+# Define protein sets of interest
+protSetsOfInterest <- list(WholePanel=finalTargets$ENTREZID, 
+                           MultiModal=finalTargets[finalTargets$Model != "BiModal",]$ENTREZID,
+                           BiModal=finalTargets[finalTargets$Model != "MultiModal",]$ENTREZID,
+                           InValidation=finalTargets[finalTargets$InValidation == "Yes",]$ENTREZID,
+                           MultiModalInValidation=finalTargets[finalTargets$Model != "MultiModal" &
+                                                               finalTargets$InValidation == "Yes",]$ENTREZID)
+
+```
+
+##### Filter terms 
+
+Need to make sure we keep only terms that have any overlap with the network
+
+```{r}
+
+keepOnlyTermsWithOverlap <- function(protIDs,
+                                     termList,
+                                     minOvlp=1,
+                                     minTermSize=1) {
+
+  # Loop over terms and return
+  checkOverlap <- sapply(names(termList), function(termName) {
+    
+    # Test if any common proteins
+    commonProts <- intersect(termList[[termName]], 
+                             protIDs)
+    
+    # Filter
+    check <- length(commonProts) >= minOvlp & # A minimum number of proteins must overlap
+             length(termList[[termName]]) > minTermSize # Terms have to be of a minimum size
+    
+    # Return where not
+    return(check)
+    
+  })
+  
+  # Return
+  return(termList[checkOverlap])
+  
+}
+
+```
+
+##### Run Method
+
+###### Reactome
+
+```{r}
+
+performNeatTest <- function(...) {
+  
+  # Run NEAT
+  neatRes <- neat_defineBackground(...)
+  neatRes <- data.frame(neatRes)
+  
+  # Rename
+  colnames(neatRes) <- c("Panel Set", "Term", "Number of Edges", "Expected Number of Edges", "PVal", "AdjPVal", "Conclusion")
+  
+  # Return
+  return(neatRes[order(neatRes$AdjPVal,
+                       decreasing=FALSE),])
+  
+}
+
+# Check significant
+neatResReac <- performNeatTest(alist = protSetsOfInterest,
+                               blist = keepOnlyTermsWithOverlap(protIDs=union(omniPathPPI_1stDegreeEdges_dedup$ENTREZID.x,
+                                                                              omniPathPPI_1stDegreeEdges_dedup$ENTREZID.y),
+                                                                termList=reacPaths,
+                                                                minOvlp=3,
+                                                                minTermSize=10), 
+                               network = as.matrix(omniPathPPI_1stDegreeEdges_dedup[,c("ENTREZID.x", "ENTREZID.y")]),
+                               nettype = 'undirected', 
+                               nodes = prots2Test, 
+                               alpha = 0.05, 
+                               mtc.type = 'fdr')
+
+# Get significant
+neatResReac[neatResReac$AdjPVal < 0.05 & neatResReac$`Panel Set` == "MultiModal",]
+
+```
+
+###### KEGG
+
+```{r}
+
+# Check significant
+neatResKegg <- performNeatTest(alist = protSetsOfInterest,
+                               blist = keepOnlyTermsWithOverlap(protIDs=union(omniPathPPI_1stDegreeEdges_dedup$ENTREZID.x,
+                                                                              omniPathPPI_1stDegreeEdges_dedup$ENTREZID.y),
+                                                                termList=keggPaths,
+                                                                minOvlp=1,
+                                                                minTermSize=1), 
+                               network = as.matrix(omniPathPPI_1stDegreeEdges_dedup[,c("ENTREZID.x", "ENTREZID.y")]),
+                               nettype = 'undirected', 
+                               nodes = prots2Test, 
+                               alpha = 0.05, 
+                               mtc.type = 'fdr')
+
+# Get significant
+neatResKegg[neatResKegg$AdjPVal < 0.05 & neatResKegg$`Panel Set` == "MultiModal",]
+
+```
+
+###### GO BP
+
+```{r}
+
+# Check significant
+neatResGobp <- performNeatTest(alist = protSetsOfInterest,
+                               blist = keepOnlyTermsWithOverlap(protIDs=union(omniPathPPI_1stDegreeEdges_dedup$ENTREZID.x,
+                                                                              omniPathPPI_1stDegreeEdges_dedup$ENTREZID.y),
+                                                                termList=gobpPaths,
+                                                                minOvlp=1,
+                                                                minTermSize=1), 
+                               network = as.matrix(omniPathPPI_1stDegreeEdges_dedup[,c("ENTREZID.x", "ENTREZID.y")]),
+                               nettype = 'undirected', 
+                               nodes = prots2Test, 
+                               alpha = 0.05, 
+                               mtc.type = 'fdr')
+
+# Get significant
+neatResGobp[neatResGobp$AdjPVal < 0.05 & neatResGobp$`Panel Set` == "MultiModal",]
+
+```
+
+
+
+
+
+

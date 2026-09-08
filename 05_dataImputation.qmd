@@ -1,0 +1,284 @@
+---
+title: "Data Imputation"
+format: revealjs
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source parameters, functions and install packages
+here::i_am("05_dataImputation.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Save as RDS
+plotList <- readRDS(here::here(figDir, 
+                    "04_eda_figs.rds"))
+ 
+```
+
+
+### Source functions for imputation
+
+# Source specific functions for 
+source(here::here("utilities", "pancreatic_cancer_biomarkers", "code", "Imput_funcs.r")) # trKNN
+
+### Load data
+
+```{r}
+
+# Metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata_filtered.R"))
+
+# Abundance tables
+source(here::here("utilities", "R", "codeModules", "data", "unFiltered_quantTables.R"))
+
+# QC tables
+source(here::here("utilities", "R", "codeModules", "data", "unFiltered_serumQCTables.R"))
+
+# Abundance tables (filtered)
+# source(here::here("utilities", "R", "codeModules", "data", "filtered_quantTables.R"))
+
+# Read in cyclic Loess-normalised data
+crossSectional_normQuantTable <- read.table(here::here(diaDir, "normalised", "metaCrossSectional_NormalyzerDE_byCondition", "CycLoess-normalized.txt"), sep="\t", header=TRUE, row.names=1)
+
+```
+
+## Main
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+Below is adapted from code by Dr Emily Johnson: https://github.com/CBFLivUni/pancreatic_cancer_biomarkers/blob/HedrichCNO/06_imputation_optimisation.qmd
+
+### Filter by 20% missingness
+
+```{r}
+
+# Filter by missingess
+source(here::here("utilities", "R", "codeModules", "data", "filterByMissingness.R"))
+
+```
+
+### Prep data for imputation
+
+```{r}
+
+# Subset metadata
+imputeMetaData <- metaCrossSectional[colnames(quantTable_crossSectional)[-1],c("Sample_ID","Condition")]
+imputeMetaData <- rbind(data.frame(Sample_ID=c(colnames(quantTable_crossSectional_serumQC)[-1], 
+                                               colnames(quantTable_crossSectional_instrQC)[-1]),
+                                   Condition=c(rep("Serum_QC", ncol(quantTable_crossSectional_serumQC)-1), 
+                                               rep("Instrument_QC", ncol(quantTable_crossSectional_instrQC)-1))),
+                                   imputeMetaData)
+
+# Rename to data_impute to fit emily's code
+data_impute <- crossSectional_normQuantTable[,imputeMetaData$Sample_ID]
+
+# Get QC-only
+data_impute_QCOnly <- data_impute[,grepl("QC",colnames(data_impute))]
+
+# Retain only proteins with non-NAs
+imputDataCross_noNA <- crossSectional_normQuantTable[!is.na(rowSums(crossSectional_normQuantTable)),metaCrossSectional$Sample_ID]
+imputDataCross_onlyMissing <- crossSectional_normQuantTable[is.na(rowSums(crossSectional_normQuantTable)),metaCrossSectional$Sample_ID]
+dim(imputDataCross_noNA)
+
+```
+
+### Imputation with QC samples
+
+#### Perform imputation
+
+```{r}
+
+# Toggle whether to read in if file exists
+impFileName <- here::here(impDir, "impMethodsTrialled.rds")
+if (!file.exists(impFileName) | reGenerateFiles) {
+
+  # Run imputation
+  impAllData   <- suppressWarnings(RunAllImputationMethods(data_impute, imputeMetaData, group="Condition"))
+  saveRDS(impAllData, impFileName)
+
+# Else read in from file
+} else {
+  
+  impAllData <- readRDS(impFileName)
+  
+}
+
+# Drop NULLs
+impAllData <- impAllData[!sapply(impAllData, is.null)]
+  
+# Make tall
+imputDataTall <- lapply(names(impAllData), function(method) data.frame(reshape2::melt(data.frame(ProtID=rownames(impAllData[[method]]), impAllData[[method]]), id.vars="ProtID"), Method=method))
+names(imputDataTall) <- names(impAllData)
+  
+# Combine
+imputDataTall <- do.call("rbind",imputDataTall)
+
+# Retain only QC samples
+imputDataTall_qcOnly <- imputDataTall[grepl("QC",imputDataTall$variable),]
+
+```
+
+### Save imputed data
+
+```{r}
+
+# Loop over imputation methods
+for (impType in names(impAllData)) {
+
+  # Save
+  print(impType)
+  write.table(data.frame(Protein=rownames(impAllData[[impType]]), impAllData[[impType]][,!grepl("QC", colnames(impAllData[[impType]]))]),
+              here::here(impDir, paste0("quantTable_imputedWith",impType,".tsv")),
+              sep="\t", quote=FALSE)
+  
+}
+
+```
+
+### Perform PCAs
+
+```{r}
+
+# Loop over imputation methods
+for (impType in names(impAllData)) {
+
+  # Save
+  print(impType)
+  subImpMat <- impAllData[[impType]][,metaCrossSectional$Sample_ID]
+  
+  # Run PCA
+  crossChildPCA <- prcomp(t(subImpMat[!is.na(rowSums(subImpMat)), metaCrossSectional[metaCrossSectional$Age_Group == "Child",]$Sample_ID]), center=TRUE, scale=TRUE)
+  
+  # Merge with metadata
+  crossChildPCA_metaData <- merge(metaCrossSectional[,!grepl("^PC",colnames(metaCrossSectional))], crossChildPCA$x, by.x="Sample_ID", by.y="row.names")
+  
+  # Loop over PCs
+  ## All together
+  for (i in 1:4) {
+    
+    # Plot
+    # Technical
+    plate_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+      scale_fill_manual(values=plateCols) +
+      theme_minimal(base_size=24) +
+      theme(legend.position="right", 
+            legend.direction="vertical",
+            legend.title=element_text(size=32),
+            legend.text=element_text(size=24),
+            axis.title=element_text(size=42),
+            plot.title=element_text(size=64)) +
+      labs(fill="Plate") +
+      ggtitle("Child Samples") +
+      guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+    row_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="ROW", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+      theme_minimal(base_size=24) +
+      theme(legend.position="right", 
+            legend.direction="vertical",
+            legend.title=element_text(size=32),
+            legend.text=element_text(size=24),
+            axis.title=element_text(size=42),
+            plot.title=element_text(size=64)) +
+      labs(fill="Row") +
+      ggtitle("Child Samples") +
+      guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+    col_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="COLUMN", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+      theme_minimal(base_size=24) +
+      theme(legend.position="right", 
+            legend.direction="vertical",
+            legend.title=element_text(size=32),
+            legend.text=element_text(size=24),
+            axis.title=element_text(size=42),
+            plot.title=element_text(size=64)) +
+      labs(fill="Column") +
+      ggtitle("Child Samples") +
+      guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+    
+    ## Biological
+    cond_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+      scale_fill_manual(values=tidyCondCols) +
+      theme_minimal(base_size=24) +
+      theme(legend.position="right", 
+            legend.direction="vertical",
+            legend.title=element_text(size=32),
+            legend.text=element_text(size=24),
+            axis.title=element_text(size=42),
+            plot.title=element_text(size=64)) +
+      labs(fill="Condition") +
+      ggtitle("Child Samples") +
+      guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+    sex_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+      scale_fill_manual(values=sexCols) +
+      theme_minimal(base_size=24) +
+      theme(legend.position="right", 
+            legend.direction="vertical",
+            legend.title=element_text(size=32),
+            legend.text=element_text(size=24),
+            axis.title=element_text(size=42),
+            plot.title=element_text(size=64)) +
+      labs(fill="Sex") +
+      ggtitle("Child Samples") +
+      guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+    age_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+      scale_fill_continuous(high="darkred", low="white") +
+      theme_minimal(base_size=24) +
+      theme(legend.position="right", 
+            legend.direction="vertical",
+            legend.title=element_text(size=32),
+            legend.text=element_text(size=24),
+            axis.title=element_text(size=42),
+            plot.title=element_text(size=64)) +
+      ggtitle("Child Samples") +
+      guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+    
+    # Save
+    dir.create(here::here(resCrossDiscoDir, "eda", "PCA", "childSamples", "imputed", impType),
+               recursive=TRUE)
+    ggsave(here::here(resCrossDiscoDir, "eda", "PCA", "childSamples", "imputed", impType, paste0("pcaBiplot.pc",i,"to",i+1,".colByPlate.crossSectional_childSamples.png")), plate_plt, width=6000, height=4000, units="px")
+    ggsave(here::here(resCrossDiscoDir, "eda", "PCA", "childSamples", "imputed", impType, paste0("pcaBiplot.pc",i,"to",i+1,".colByPlateRow.crossSectional_childSamples.png")), row_plt, width=6000, height=4000, units="px")
+    ggsave(here::here(resCrossDiscoDir, "eda", "PCA", "childSamples", "imputed", impType, paste0("pcaBiplot.pc",i,"to",i+1,".colByPlateColumn.crossSectional_childSamples.png")), col_plt, width=6000, height=4000, units="px")
+    
+    ggsave(here::here(resCrossDiscoDir, "eda", "PCA", "childSamples", "imputed", impType, paste0("pcaBiplot.pc",i,"to",i+1,".colByCondition.crossSectional_childSamples.png")), cond_plt, width=6000, height=4000, units="px")
+    ggsave(here::here(resCrossDiscoDir, "eda", "PCA", "childSamples", "imputed", impType, paste0("pcaBiplot.pc",i,"to",i+1,".colBySex.crossSectional_childSamples.png")), sex_plt, width=6000, height=4000, units="px")
+    ggsave(here::here(resCrossDiscoDir, "eda", "PCA", "childSamples", "imputed", impType, paste0("pcaBiplot.pc",i,"to",i+1,".colByAge.crossSectional_childSamples.png")), age_plt, width=6000, height=4000, units="px")
+    
+  }
+  
+}
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "05_dataImputation_figs.rds"))
+
+```
+
+
+
+

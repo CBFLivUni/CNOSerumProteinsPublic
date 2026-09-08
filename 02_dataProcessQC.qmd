@@ -1,0 +1,940 @@
+---
+title: "Data Processing, Normalisation & QC"
+author: "Euan McDonnell"
+format: html
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source metadata
+here::i_am("02_dataProcessQC.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+## Load data
+
+### Start list for plots
+
+```{r}
+
+# Initialise, unknown length
+plotList <- list()
+
+```
+
+### Metadata
+
+```{r}
+
+# Source metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata.R"))
+
+```
+
+### Quantification table
+
+```{r}
+
+# Read in pivot table
+## Read in protein abundance table of actual samples
+quantTable_crossSectional <- read.table(here::here(diaDir, "processed", 
+                                                   "crossSectional_pivotTable_PGQuantity.sampleIDs_noSerumQCs.tsv"), sep="\t", quote="\"", header=TRUE)
+rownames(quantTable_crossSectional) <- quantTable_crossSectional$PG.ProteinGroups
+
+```
+
+### Drop depleted proteins
+
+```{r}
+
+# Depleted prots
+depletedProtData <- read.table(here::here(baseDataDir, "annotation", "depletedProteinSet.txt"), sep="\t", header=FALSE)
+depletedProts <- depletedProtData$V2
+
+# Drop proteins
+nrow(quantTable_crossSectional)
+quantTable_crossSectional <- quantTable_crossSectional[!quantTable_crossSectional$PG.ProteinGroups %in% depletedProts,]
+
+```
+
+```{r}
+
+# Load QCs
+source(here::here("utilities", "R", "codeModules", "data", "unFiltered_serumQCTables.R"))
+
+# Retain unfiltered data table
+quantTable_crossSectional_unFilt <- quantTable_crossSectional
+
+# Rownames
+rownames(quantTable_crossSectional) <- quantTable_crossSectional$PG.ProteinGroups
+
+# Visualise
+dim(quantTable_crossSectional_serumQC); colnames(quantTable_crossSectional_serumQC)
+dim(quantTable_crossSectional_instrQC); colnames(quantTable_crossSectional_instrQC)
+
+```
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+### Plot abundances of depleted proteins
+
+Test to see group-structure of depleted proteins is present prior to any real normalisation or processing.
+
+```{r}
+
+# Add if depleted protein
+qntTable_depletedProt <- reshape2::melt(quantTable_crossSectional[c("P02768","P02763","P01023","P01011"),], id.vars="PG.ProteinGroups")
+qntTable_depletedProt <- merge(metaCrossSectional[metaCrossSectional$Site != "Leiden" & metaCrossSectional$Condition != "JIA",], qntTable_depletedProt, by.x="Sample_ID", by.y="variable")
+
+# Plot
+ggplot(qntTable_depletedProt, 
+       aes(y=log2(value), x=Condition, fill=Condition)) +
+  geom_boxplot() + 
+  geom_jitter(size=0.75) +
+  facet_grid(cols=vars(PG.ProteinGroups), scale="free_y", space="free_y") +
+  scale_fill_manual(values=condCols) +
+  theme_classic() + theme(axis.text.x=element_blank())
+
+```
+
+### Get proteins detected in all Serum QC samples
+
+```{r}
+
+# Get
+rownames(quantTable_crossSectional_serumQC) <- quantTable_crossSectional_serumQC$PG.ProteinGroups
+serumProtsCross <- GetSerumQCProteins(serumQCData=quantTable_crossSectional_serumQC[,-1]); length(serumProtsCross)
+instrProtsCross <- GetSerumQCProteins(serumQCData=quantTable_crossSectional_instrQC[,-1]); length(serumProtsCross)
+
+```
+
+## Checking for drift
+
+```{r}
+
+# Tall format
+quantTable_crossSectional_serumQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_crossSectional_serumQC), 
+                                                                    quantTable_crossSectional_serumQC[,2:ncol(quantTable_crossSectional_serumQC)]), id.vars=c("ID"))
+quantTable_crossSectional_instrQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_crossSectional_instrQC), 
+                                                                    quantTable_crossSectional_instrQC[,2:ncol(quantTable_crossSectional_instrQC)]), id.vars=c("ID"))
+
+# Add metadata
+quantTable_crossSectional_serumQC_tall["PLATE"] <- "P1"
+quantTable_crossSectional_serumQC_tall[which(quantTable_crossSectional_serumQC_tall$variable %in% c("QC05","QC06","QC07","QC08")),]["PLATE"] <- "P2"
+quantTable_crossSectional_serumQC_tall[which(quantTable_crossSectional_serumQC_tall$variable %in% c("QC09","QC10","QC11","QC12")),]["PLATE"] <- "P3"
+quantTable_crossSectional_instrQC_tall["PLATE"] <- gsub("late", "", gsub("SerumInstrument.*", "", quantTable_crossSectional_instrQC_tall$variable))
+quantTable_crossSectional_instrQC_tall["variable"] <- gsub(".*SerumInstrument", "", quantTable_crossSectional_instrQC_tall$variable)
+
+# Order
+quantTable_crossSectional_serumQC_tall <- quantTable_crossSectional_serumQC_tall[order(quantTable_crossSectional_serumQC_tall$variable, decreasing=FALSE),]
+quantTable_crossSectional_serumQC_tall$variable <- factor(quantTable_crossSectional_serumQC_tall$variable, levels=unique(quantTable_crossSectional_serumQC_tall$variable))
+
+quantTable_crossSectional_instrQC_tall <- quantTable_crossSectional_instrQC_tall[order(quantTable_crossSectional_instrQC_tall$variable, decreasing=FALSE),]
+quantTable_crossSectional_instrQC_tall$variable <- factor(quantTable_crossSectional_instrQC_tall$variable, levels=unique(quantTable_crossSectional_instrQC_tall$variable))
+
+# Plot
+p1 <- ggplot(quantTable_crossSectional_serumQC_tall, 
+             aes(x=variable,
+                 y=log2(value), 
+                 group=variable)) + 
+  geom_violin(fill="#99E6FF",
+              width=0.75,
+              alpha=0.75) + 
+  geom_boxplot(outlier.size=4,
+               width=0.25) + 
+  ggtitle("Serum QC (Unfiltered)") +
+  xlab("Serum QC Sample") + ylab("Log2 Protein\nAbundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  theme_classic(base_size=48) +
+  theme(axis.title=element_text(size=72),
+        strip.text=element_text(size=72),
+        plot.title=element_text(size=72)) 
+p2 <- ggplot(quantTable_crossSectional_instrQC_tall, 
+             aes(x=variable,
+                 y=log2(value), 
+                 group=variable)) + 
+  geom_violin(fill="#99E6FF",
+              width=0.75,
+              alpha=0.75) + 
+  geom_boxplot(outlier.size=4,
+               width=0.25) + 
+  ggtitle("Instrument QC (Unfiltered)") +
+  xlab("Instrument QC Sample") + ylab("Log2 Protein\nAbundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  theme_classic(base_size=48) +
+  theme(axis.title=element_text(size=72),
+        strip.text=element_text(size=72),
+        plot.title=element_text(size=72)) 
+
+# Save
+ggsave(here::here(resCrossDiscoDir, "eda",
+                  "crossSectional_serumQCSamples_proteinAbundance_unFiltered.png"),
+       p1,
+       units="px", width=9000, height=3500)
+ggsave(here::here(resCrossDiscoDir, "eda",
+                  "crossSectional_instrumentQCSamples_proteinAbundance_unFiltered.png"),
+       p2,
+       units="px", width=9000, height=3500)
+
+# Add to list
+newList <- list(p1, p2)
+names(newList) <- c("UnFiltProtAbundanceSerumQC",
+                    "UnFiltProtAbundanceInstrQC")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+## Missing values
+
+### Enumerate frequencies
+
+```{r}
+
+# Enumerate raw NAs
+## Protein
+perProtNA_cross <- EnumerateNAs(quantTable_crossSectional[,metaCrossSectional$Sample_ID], idxVal=1)
+perProtNA_cross_serumQC <- EnumerateNAs(quantTable_crossSectional[serumProtsCross,metaCrossSectional$Sample_ID], idxVal=1)
+
+## Samples
+perSmplNA_cross <- EnumerateNAs(quantTable_crossSectional[,metaCrossSectional$Sample_ID], idxVal=2)
+perSmplNA_cross_serumQC <- EnumerateNAs(quantTable_crossSectional[serumProtsCross,metaCrossSectional$Sample_ID], idxVal=2)
+
+# Test dropping values on frequencies of missing proteins and samples
+perProtNACross_dropProts <- TestProteinDropThresholds(perProtNA=perProtNA_cross, quantTbl=quantTable_crossSectional[,metaCrossSectional$Sample_ID], idxVal=1)
+perProtNACross_dropProts_serumQCOnly <- TestProteinDropThresholds(perProtNA=perProtNA_cross_serumQC, quantTbl=quantTable_crossSectional[serumProtsCross,metaCrossSectional$Sample_ID], idxVal=1)
+
+perSmplNACross_dropProts <- TestProteinDropThresholds(perProtNA=perSmplNA_cross, quantTbl=quantTable_crossSectional[,metaCrossSectional$Sample_ID], idxVal=2)
+perSmplNACross_dropProts_serumQCOnly <- TestProteinDropThresholds(perProtNA=perSmplNA_cross_serumQC, quantTbl=quantTable_crossSectional[serumProtsCross,metaCrossSectional$Sample_ID], idxVal=2)
+
+# Enumerate total proteins at each threshold
+totalNProtsCross <- do.call("rbind",lapply(unique(perProtNACross_dropProts$PERCENTAGE), function(perc) 
+                                    data.frame(PERCENTAGE=perc, FREQ=nrow(perProtNACross_dropProts[perProtNACross_dropProts$PERCENTAGE == perc,]))))
+totalNProtsCross_serumQC <- do.call("rbind",lapply(unique(perProtNACross_dropProts_serumQCOnly$PERCENTAGE), function(perc) 
+                                            data.frame(PERCENTAGE=perc, FREQ=nrow(perProtNACross_dropProts_serumQCOnly[perProtNACross_dropProts_serumQCOnly$PERCENTAGE == perc,]))))
+
+```
+
+### Add to metadata
+
+```{r}
+
+# Combine
+perSmplNACross_dropProts <- merge(perSmplNACross_dropProts, metaCrossSectional, by.x="ID", by.y="Sample_ID")
+perSmplNACross_dropProts_serumQCOnly <- merge(perSmplNACross_dropProts_serumQCOnly, metaCrossSectional, by.x="ID", by.y="Sample_ID")
+
+```
+
+### Plot
+
+NOTE: Not filtering proteins separately by plate.
+
+```{r, fig.width=3.5, fig.height=2}
+
+# Cross-sectional
+source(here::here("utilities", "R", "codeModules", "plotting", "plotMissingness_crossSectional.R"))
+
+# Save
+ggsave(here::here(resCrossDiscoDir, "eda", 
+                  "propMissingValues_missingValueThresholds.png"),
+       boxPlt,
+       units="px", width=4000, height=4000)
+ggsave(here::here(resCrossDiscoDir, "eda", 
+                  "propMissingValues_missingValueThresholds_byPlate.png"),
+       boxPltByPlate,
+       units="px", width=10000, height=3000)
+
+ggsave(here::here(resCrossDiscoDir, "eda", 
+                  "propMissingValues_missingValueThresholds_justSerumQC.png"),
+       boxPlt_serumQCOnly,
+       units="px", width=4000, height=4000)
+ggsave(here::here(resCrossDiscoDir, "eda", 
+                  "propMissingValues_missingValueThresholds_justSerumQC_byPlate.png"),
+       boxPltByPlate_serumQCOnly,
+       units="px", width=10000, height=3000)
+
+ggsave(here::here(resCrossDiscoDir, "eda", 
+                  "nProteins_missingValueThresholds_allProts.png"),
+       barPlt,
+       units="px", width=4000, height=4000)
+ggsave(here::here(resCrossDiscoDir, "eda", 
+                  "nProteins_missingValueThresholds_serumQCProts.png"),
+       barPlt_serumQCOnly,
+       units="px", width=4000, height=4000)
+
+# Add to list
+newList <- list(boxPlt,
+                boxPlt_serumQCOnly,
+                barPlt,
+                barPlt_serumQCOnly)
+names(newList) <- c("PropMissingValsUnFilt",
+                    "PropMissingValsSerumQCProts",
+                    "NProtsAllProts",
+                    "NProtsSerumQCProts")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Checking for drift
+
+```{r, fig.height=5, fig.width=12}
+
+# Tall format
+rownames(quantTable_crossSectional_serumQC) <- quantTable_crossSectional_serumQC$PG.ProteinGroups
+rownames(quantTable_crossSectional_instrQC) <- quantTable_crossSectional_instrQC$PG.ProteinGroups
+quantTable_crossSectional_serumQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_crossSectional_serumQC[serumProtsCross,]), 
+                                                                    quantTable_crossSectional_serumQC[serumProtsCross,2:ncol(quantTable_crossSectional_serumQC)]), id.vars=c("ID"))
+quantTable_crossSectional_instrQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_crossSectional_instrQC[serumProtsCross,]), 
+                                                                    quantTable_crossSectional_instrQC[serumProtsCross,2:ncol(quantTable_crossSectional_instrQC)]), id.vars=c("ID"))
+
+# Get sample IDs
+
+# Add metadata
+quantTable_crossSectional_serumQC_tall["PLATE"] <- "P1"
+quantTable_crossSectional_serumQC_tall[which(quantTable_crossSectional_serumQC_tall$variable %in% c("QC05","QC06","QC07","QC08")),]["PLATE"] <- "P2"
+quantTable_crossSectional_serumQC_tall[which(quantTable_crossSectional_serumQC_tall$variable %in% c("QC09","QC10","QC11","QC12")),]["PLATE"] <- "P3"
+quantTable_crossSectional_instrQC_tall["PLATE"] <- gsub("late", "", gsub("SerumInstrument.*", "", quantTable_crossSectional_instrQC_tall$variable))
+quantTable_crossSectional_instrQC_tall["variable"] <- gsub(".*SerumInstrument", "", quantTable_crossSectional_instrQC_tall$variable)
+
+# Order
+quantTable_crossSectional_serumQC_tall <- quantTable_crossSectional_serumQC_tall[order(quantTable_crossSectional_serumQC_tall$variable, decreasing=FALSE),]
+quantTable_crossSectional_serumQC_tall$variable <- factor(quantTable_crossSectional_serumQC_tall$variable, levels=unique(quantTable_crossSectional_serumQC_tall$variable))
+
+quantTable_crossSectional_instrQC_tall <- quantTable_crossSectional_instrQC_tall[order(quantTable_crossSectional_instrQC_tall$variable, decreasing=FALSE),]
+quantTable_crossSectional_instrQC_tall$variable <- factor(quantTable_crossSectional_instrQC_tall$variable, levels=unique(quantTable_crossSectional_instrQC_tall$variable))
+
+# Plot
+p1 <- ggplot(quantTable_crossSectional_serumQC_tall, aes(x=variable, 
+                                                 y=log2(value),
+                                                 group=variable)) + 
+  xlab("Serum QC Sample") + ylab("Log2 Protein Abundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  geom_violin(fill="#99E6FF",
+              width=0.75,
+              alpha=0.75) + 
+  geom_boxplot(outlier.size=4,
+               width=0.25) + 
+  ggtitle("Serum QC (Filtered)") +
+  xlab("Serum QC Sample") + ylab("Log2 Protein\nAbundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  theme_classic(base_size=48) +
+  theme(axis.title=element_text(size=72),
+        strip.text=element_text(size=72),
+        plot.title=element_text(size=72)) 
+p2 <- ggplot(quantTable_crossSectional_instrQC_tall, aes(x=variable, 
+                                                 y=log2(value),
+                                                 group=variable)) + 
+  ggtitle("Instrument QC (Filtered)") +
+  xlab("Instrument QC Sample") + ylab("Log2 Protein Abundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  geom_violin(fill="#99E6FF",
+              width=0.75,
+              alpha=0.75) + 
+  geom_boxplot(outlier.size=4,
+               width=0.25) + 
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  theme_classic(base_size=48) +
+  theme(axis.title=element_text(size=72),
+        strip.text=element_text(size=72),
+        plot.title=element_text(size=72)) 
+
+# Save
+ggsave(here::here(resCrossDiscoDir, "eda",
+                  "crossSectional_serumQCSamples_proteinAbundance_nonMissingInAllSerumQC.png"),
+       p1,
+       units="px", width=9000, height=3500)
+ggsave(here::here(resCrossDiscoDir, "eda",
+                  "crossSectional_instrumentQCSamples_proteinAbundance_nonMissingInAllSerumQC.png"),
+       p2,
+       units="px", width=9000, height=3500)
+
+
+# Add to list
+newList <- list(p1, p2)
+names(newList) <- c("SerumQCFiltProtAbundanceSerumQC",
+                    "SerumQCFiltProtAbundanceInstrQC")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Correlate N missing with abundance
+
+```{r}
+
+# Correlate abundance and number of missing values
+MeanFreqMissing_cross <- data.frame(MeanAbundance=rowMeans(quantTable_crossSectional[,metaCrossSectional$Sample_ID], na.rm=TRUE),
+                                    FreqMissing=apply(quantTable_crossSectional[,metaCrossSectional$Sample_ID], 
+                                                      1, function(row) length(row[is.na(row)])))
+
+# Plot
+## Correlate cross-sectional
+stats::cor(MeanFreqMissing_cross[MeanFreqMissing_cross$FreqMissing > 0,]$MeanAbundance, 
+    MeanFreqMissing_cross[MeanFreqMissing_cross$FreqMissing > 0,]$FreqMissing, method="spearman", use="complete.obs")
+
+# Plot
+ggplot(MeanFreqMissing_cross[MeanFreqMissing_cross$FreqMissing > 0,], aes(x=log2(MeanAbundance), y=FreqMissing)) + 
+  geom_point() + 
+  xlab("Log2 Mean Protein Abundance") + ylab("Frequency of Missing") +
+  theme_classic(base_size=16) + theme(axis.title=element_text(size=24))
+
+```
+
+### Investigate samples with high numbers of missing proteins
+
+Define this as \> 20%
+
+```{r}
+
+perSmplNACross_dropProts[perSmplNACross_dropProts$PROP_MISSING > maxPropMissing & perSmplNACross_dropProts$PERCENTAGE == "20%",]
+
+```
+
+### Test for enrichment of missing values
+
+#### Binarise to missing or not
+
+```{r}
+
+# Binarise data 
+rownames(quantTable_crossSectional) <- quantTable_crossSectional$PG.ProteinGroups
+quantTableCross_naBinarised_unFilt <- GenerateBinaryMissingValTable(quantTable_crossSectional[,metaCrossSectional$Sample_ID], metaCrossSectional)
+
+# Combined
+forTestMetaCross_unFilt <- merge(metaCrossSectional, t(quantTableCross_naBinarised_unFilt[,metaCrossSectional$Sample_ID]), by.x="Sample_ID", by.y="row.names")
+rownames(forTestMetaCross_unFilt) <- forTestMetaCross_unFilt$Sample_ID
+
+```
+
+#### Test for protein-wise differences in missing values
+
+##### Filtered samples
+
+```{r}
+
+# Test for associations between missingness and factors
+## Cross-Sectional
+allFactorCross <- TestFactors(metaData=forTestMetaCross_unFilt, factorCols=c("Age","Sex","Condition","PLATE","Site"), ids=rownames(quantTableCross_naBinarised_unFilt))
+allFactorChild <- TestFactors(metaData=merge(metaCrossSectional[metaCrossSectional$Age_Group == "Child",], data.frame(t(quantTableCross_naBinarised_unFilt)), 
+                              by.x="Sample_ID", by.y="row.names"), factorCols=c("Age","Sex","Condition","PLATE","Site"), ids=rownames(quantTableCross_naBinarised_unFilt))
+
+# Sig filter
+missSig_protsAll <- allFactorCross[allFactorCross$PADJ < 0.05 & allFactorCross$Factor == "Condition",]
+missSig_protsChild <- allFactorChild[allFactorChild$PADJ < 0.05 & allFactorChild$Factor == "Condition",]
+
+# Save
+dir.create(here::here(resCrossDiscoDir, "eda", "missingnessSigTests"), showWarnings=FALSE, recursive=TRUE)
+write.table(allFactorCross, here::here(resCrossDiscoDir, "eda", "missingnessSigTests", "binarisedMissingVals_sampleVariableSigTests_allCrossSectionalTogether_unfiltered.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(allFactorChild, here::here(resCrossDiscoDir, "eda", "missingnessSigTests", "binarisedMissingVals_sampleVariableSigTests_crossSectionalChildOnly_unfiltered.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Filter quantification sample
+
+```{r}
+
+# Retain only serum QC proteins
+quantTable_crossSectional <- quantTable_crossSectional[serumProtsCross,]
+dim(quantTable_crossSectional)
+
+# Drop proteins with high frequencies of missing values
+crossPropProts <- EnumerateNAs(quantTable_crossSectional[serumProtsCross,metaCrossSectional$Sample_ID], idx=1)
+quantTable_crossSectional <- quantTable_crossSectional[crossPropProts[crossPropProts$PROP_MISSING < maxPropMissing,]$ID,]
+dim(quantTable_crossSectional)
+
+```
+
+
+```{r, fig.height=3, fig.width=6}
+
+# Define samples with high frequencies of missing values
+crossPropSmpls <- EnumerateNAs(quantTable_crossSectional[serumProtsCross,metaCrossSectional$Sample_ID], idx=2)
+
+crossPropSmpls <- merge(crossPropSmpls, metaCrossSectional, by.x="ID", by.y="Sample_ID")
+
+table(crossPropSmpls[crossPropSmpls$PROP_MISSING >= 0.2,]$Condition)
+
+# Plot
+ggplot(crossPropSmpls,
+       aes(x=ID,
+           y=PROP_MISSING,
+           fill=Condition)) + 
+  geom_bar(stat="identity") +
+  scale_fill_manual(values=condCols) +
+  facet_grid(cols=vars(Condition),
+             scale="free_x", 
+             space="free_x") +
+  xlab("Sample") + ylab("Proportion of Missing Proteins") +
+  ylim(0, 1) +
+  geom_hline(yintercept=maxPropMissing, linetype="dashed", color="darkgrey") +
+  theme_classic() + 
+  theme(axis.text.x=element_blank(),
+        legend.position="none")
+
+quantTable_crossSectional <- data.frame(PG.ProteinAccessions=rownames(quantTable_crossSectional), 
+                                        quantTable_crossSectional[,c(crossPropSmpls[crossPropSmpls$PROP_MISSING < maxPropMissing,]$ID)])
+
+```
+
+
+### Subset metadata to match filtered columns
+
+```{r}
+
+# Subset metadata
+addMetaCross <- addMetaCross[which(addMetaCross$Sample_ID %in% colnames(quantTable_crossSectional)),]
+metaCrossSectional <- metaCrossSectional[which(metaCrossSectional$Sample_ID %in% colnames(quantTable_crossSectional)),]
+
+```
+
+### Filter samples
+
+```{r}
+
+# Check max missingness
+if (max(EnumerateNAs(quantTable_crossSectional[,metaCrossSectional$Sample_ID], idx=1)$PROP_MISSING) > maxPropMissing) { warning("Protein Missingness for Cross-Sectional not controlled at desired level") }
+
+# Filter proteins again to make sure proteins are < 20% after removing samples
+crossPropProts <- EnumerateNAs(quantTable_crossSectional[serumProtsCross,metaCrossSectional$Sample_ID], idx=1)
+length(c(crossPropSmpls[crossPropSmpls$PROP_MISSING < maxPropMissing,]$ID))
+quantTable_crossSectional <- data.frame(PG.ProteinAccessions=rownames(quantTable_crossSectional),
+                                        quantTable_crossSectional[,c(crossPropSmpls[crossPropSmpls$PROP_MISSING < maxPropMissing,]$ID)])
+dim(quantTable_crossSectional)
+
+```
+
+### Check and filter proteins MNAR for Condition
+
+The main idea here is to check that any proteins that may be MNAR with condition, thus possible interesting candidates wrt any one condition, we actually have robust measurements for. To do this, we enumerate the overall and per-condition missingness frequencies and apply filtering thresholds to these individually. Main idea is to set a minimum per-group missingness threshold, then an overall missingness threshold more lax than the one used above. 
+
+```{r}
+
+# Filter proteins by a certain proportion of missing
+checkGroupWiseMissing <- function(metaData,
+                                  prots,
+                                  maxPropMissingPerGroup=0.5,
+                                  maxPropMissingOverall=0.3) {
+
+  # Loop over proteins
+  checkVec <- unlist(sapply(seq_along(prots), function(i) {
+    
+    # Subset metadata to get child data
+    subData <- metaData[,c(prots[[i]], 
+                           "Condition")]
+    
+    # Get proportion of missing
+    freqData <- as.matrix(table(subData))
+    propData <- sweep(freqData, 
+                      STATS=colSums(freqData), 
+                      2, 
+                      FUN="/")
+    
+    # Get if protein is above less stringent thresholds
+    if (all(propData[rownames(propData) == "0",] > maxPropMissingPerGroup) & # All groups  at least x% non-missing
+            (rowSums(freqData)["0"] / nrow(subData)) < maxPropMissingOverall) { # At most y% missing overall
+      
+      # Return
+      return(prots[[i]])
+      
+    } else { return(NA) }
+    
+  }))
+
+  # Return
+  return(prots[!is.na(checkVec)])
+
+}
+
+# Check missingness
+colnames(forTestMetaCross_unFilt) <- gsub("[;]","_",colnames(forTestMetaCross_unFilt))
+stringentMissingCheck_cross <- checkGroupWiseMissing(metaData=forTestMetaCross_unFilt,
+                                                     prots=setdiff(missSig_protsAll$ID, 
+                                                                   rownames(quantTable_crossSectional)),
+                                                     maxPropMissingPerGroup=maxPropMissingPerGroup,
+                                                     maxPropMissingOverall=maxPropMissingOverall)
+stringentMissingCheck_child <- checkGroupWiseMissing(metaData=forTestMetaCross_unFilt[forTestMetaCross_unFilt$Age_Group == "Child",],
+                                                     prots=setdiff(missSig_protsChild$ID, 
+                                                                   rownames(quantTable_crossSectional)),
+                                                     maxPropMissingPerGroup=maxPropMissingPerGroup,
+                                                     maxPropMissingOverall=maxPropMissingOverall)
+
+# Check for any
+stringentMissingCheck_cross
+stringentMissingCheck_child
+
+```
+
+### Save
+
+```{r}
+
+# Create output
+dir.create(here::here(diaDir, "filtered"), showWarnings=FALSE, recursive=TRUE)
+
+# Save cross-Sectional
+write.table(quantTable_crossSectional, here::here(diaDir, "filtered", paste0("crossSectional_quantTable.filtBy_serumQCProts_maxMissing",maxPropMissing,".tsv")), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Checking for drift
+
+```{r, fig.height=5, fig.width=12}
+
+# Tall format
+rownames(quantTable_crossSectional_serumQC) <- quantTable_crossSectional_serumQC$PG.ProteinGroups
+quantTable_crossSectional_serumQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_crossSectional_serumQC[rownames(quantTable_crossSectional),]), 
+                                                                    quantTable_crossSectional_serumQC[rownames(quantTable_crossSectional),2:ncol(quantTable_crossSectional_serumQC)]), id.vars=c("ID"))
+
+# Get sample IDs
+
+# Add metadata
+quantTable_crossSectional_serumQC_tall["PLATE"] <- "P1"
+quantTable_crossSectional_serumQC_tall[which(quantTable_crossSectional_serumQC_tall$variable %in% c("QC05","QC06","QC07","QC08")),]["PLATE"] <- "P2"
+quantTable_crossSectional_serumQC_tall[which(quantTable_crossSectional_serumQC_tall$variable %in% c("QC09","QC10","QC11","QC12")),]["PLATE"] <- "P3"
+
+# Order
+quantTable_crossSectional_serumQC_tall <- quantTable_crossSectional_serumQC_tall[order(quantTable_crossSectional_serumQC_tall$variable, decreasing=FALSE),]
+quantTable_crossSectional_serumQC_tall$variable <- factor(quantTable_crossSectional_serumQC_tall$variable, levels=unique(quantTable_crossSectional_serumQC_tall$variable))
+
+# Plot
+ggplot(quantTable_crossSectional_serumQC_tall, aes(x=variable, y=log2(value))) + 
+  geom_boxplot() + ggtitle("Serum QC (Cross-Sectional)") +
+  xlab("Serum QC Sample") + ylab("Log2 Protein Abundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  theme_classic(base_size=24)
+
+```
+
+### Cluster missing values
+
+#### Preprocess and define colours
+
+```{r}
+
+# Prepare matrices
+quantTableCross_naZeros <- quantTable_crossSectional[,metaCrossSectional$Sample_ID]
+
+# Set non-zero to 1
+quantTableCross_naZeros[!is.na(quantTableCross_naZeros)] <- 1
+
+# Set NA to 0
+quantTableCross_naZeros[is.na(quantTableCross_naZeros)] <- 0
+
+# Tidy names
+colnames(quantTableCross_naZeros) <- gsub(" Osteo","\nOsteo",colnames(quantTableCross_naZeros))
+
+# Harmonize data with metadata
+quantTableCross_naZeros <- quantTableCross_naZeros[,metaCrossSectional$Sample_ID]
+
+# Define shared color
+metaCrossSectional$Age[is.na(metaCrossSectional$Age)] <- 0
+mainColFun = colorRamp2(c(0, 1), c("white", "mediumblue"))
+ageColFun_cross  = colorRamp2(c(0,min(metaCrossSectional$Age, na.rm=T), max(metaCrossSectional$Age, na.rm=T)), c("darkgrey","white","darkred"))
+
+```
+
+#### Plot as heatmaps
+
+```{r}
+
+source(here::here("utilities", "R", "codeModules", "plotting", "plotMissingHmaps_crossSectional.R"))
+
+```
+
+### View distributions as boxplots
+
+```{r, fig.height=3, fig.width=6}
+
+# Get as tall
+rawCrossTall <- melt(data.frame(ID=rownames(quantTable_crossSectional), log2(quantTable_crossSectional[,metaCrossSectional$Sample_ID])), id.vars="ID")
+
+# Merge with
+rawCrossTall <- merge(rawCrossTall, metaCrossSectional, by.x="variable", by.y="Sample_ID")
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","Age_Group","PLATE","Ethnicity","Site")) {
+
+  # Plot
+  plt <- ggplot(rawCrossTall, aes(x=variable, y=value, fill=.data[[fctr]])) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=condCols) +
+    xlab("Samples") + ylab("Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic() + theme(axis.text.x=element_blank(), 
+                       legend.position="top") +
+    guides(fill=guide_legend(nrow=1, byRow=TRUE))
+  print(plt)
+  
+} 
+
+```
+
+### Generate Summarize Experiment for DEP
+
+```{r}
+
+# Generate design matrix
+designCross_m <- data.frame(label=rownames(metaCrossSectional), Sex=metaCrossSectional$Sex, Age=metaCrossSectional$Age, condition=metaCrossSectional$Condition)
+rownames(designCross_m) <- metaCrossSectional$Sample_ID
+
+# Add replicate column
+designCross_m["replicate"] <- NA
+for (cond in unique(designCross_m$condition)) { designCross_m[designCross_m$condition == cond,]["replicate"] <- 1:nrow(designCross_m[designCross_m$condition == cond,]) }
+
+# Make summarized experiment
+uniqNames_quantTableCross  <- make_unique(quantTable_crossSectional[,c("PG.ProteinAccessions","PG.ProteinAccessions",metaCrossSectional$Sample_ID)], 
+                                          names="PG.ProteinAccessions", ids="PG.ProteinAccessions", delim=";")
+seCross <- make_se(uniqNames_quantTableCross, which(colnames(uniqNames_quantTableCross) %in% metaCrossSectional$Sample_ID), designCross_m)
+
+# Rough fix I think
+assay(seCross)[is.nan(assay(seCross))] <- NA
+
+```
+
+### Plot frequencies for missing values
+
+```{r, fig.height=3, fig.width=6}
+
+# Plot protein identification overlaps
+plot_frequency(seCross) + theme(axis.text=element_blank())
+
+# Plot protein identification overlaps (stacked bars)
+plot_coverage(seCross) + theme(legend.position="none")
+
+# Plot proteins per samples
+names(condCols) <- gsub(" ",".",names(condCols))
+plot_numbers(seCross) + scale_fill_manual(values=condCols) + 
+  theme(axis.text.x=element_blank(), legend.position="none") 
+
+```
+
+### Scale and normalise with VSN
+
+```{r}
+
+# Normalise
+## VSN
+normCross <- normalize_vsn(seCross)
+
+# Plot SD
+meanSdPlot(normCross)
+
+# Check mix/min for VSN - some strange things here with some parameterisations
+min(assay(normCross), na.rm=T)
+
+```
+
+### View distributions as boxplots
+
+```{r}
+
+# Get as tall
+normCrossTall <- melt(data.frame(ID=rownames(assay(normCross)), assay(normCross)), id.vars="ID")
+seCrossTall <- melt(data.frame(ID=rownames(assay(seCross)), assay(seCross)), id.vars="ID")
+
+# Merge with column data
+normCrossTall <- merge(normCrossTall, data.frame(colData(normCross)), by.x="variable", by.y="ID")
+seCrossTall <- merge(seCrossTall, data.frame(colData(seCross)), by.x="variable", by.y="ID")
+
+# Merge with
+normCrossTall <- merge(normCrossTall[,c("variable","ID","label","value")], metaCrossSectional, by.x="label", by.y="Sample_ID")
+seCrossTall <- merge(seCrossTall[,c("variable","ID","label","value")], metaCrossSectional, by.x="label", by.y="Sample_ID")
+
+```
+
+### View distributions as boxplots
+
+```{r}
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","Age_Group","PLATE","Ethnicity","Site")) {
+
+  # Plot
+  plt <- ggplot(normCrossTall, aes(x=variable, y=value, fill=.data[[fctr]])) + 
+    geom_boxplot() + 
+    xlab("Samples") + ylab("Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic() + theme(axis.text.x=element_blank(), 
+                       legend.position="top") +
+    guides(fill=guide_legend(nrow=1, byRow=TRUE))
+  print(plt)
+  
+}  
+
+```
+
+### Plot sample distributions
+
+```{r}
+
+# Get number of conditions per site
+freqCondPerSite <- melt(data.frame(table(metaCrossSectional[metaCrossSectional$Age_Group == "Child",][,c("Condition","Site")])))
+
+# Get proportion of conditions per site
+freqCondPerSite["Prop"] <- NA
+sites <- unique(freqCondPerSite$Site)
+for (i in seq_len(length(sites))) { freqCondPerSite[freqCondPerSite$Site == sites[[i]],]["Prop"] <- freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value / sum(freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value) }
+
+# Plot freq
+plt1 <- ggplot(freqCondPerSite,
+       aes(x=Site, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of\nSamples") +
+  theme_classic(base_size=36) + theme(axis.title=element_text(size=88),
+                                 axis.text=element_text(size=42),
+                                 legend.text=element_text(size=42)) +
+  guides(fill=guide_legend(override.aes=list(size=12)))
+
+# Plot freq
+plt2 <- ggplot(freqCondPerSite,
+       aes(x=Site, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Proportio of\nSamples") +
+  theme_classic(base_size=36) + theme(axis.title=element_text(size=88),
+                                 axis.text=element_text(size=42),
+                                 legend.text=element_text(size=42)) +
+  guides(fill=guide_legend(override.aes=list(size=12)))
+
+# Plot
+plt <- plt1 + plt2 +
+         plot_layout(nrow=1,
+                     guides = "collect",
+                     axis_titles = "collect")
+
+# save
+ggsave(here::here(resCrossDiscoDir, "eda", 
+                  paste0("sampleGroupNumbers_bySite_afterFiltration.png")),
+       plt, width=10000, height=4000, units="px")
+
+```
+
+```{r}
+
+# Get number of conditions per site
+freqCondPerSite <- melt(data.frame(table(addMetaCross_child[addMetaCross_child$Age_Group == "Child" & addMetaCross_child$Condition != "JIA" & !is.na(addMetaCross_child$Date.of.sample),][,c("Condition","Site")])))
+
+# Get proportion of conditions per site
+freqCondPerSite["Prop"] <- NA
+sites <- unique(freqCondPerSite$Site)
+for (i in seq_len(length(sites))) { freqCondPerSite[freqCondPerSite$Site == sites[[i]],]["Prop"] <- freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value / sum(freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value) }
+
+# Plot freq
+ggplot(freqCondPerSite,
+       aes(x=Site, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of Samples") +
+  theme_classic()
+
+# Plot freq
+ggplot(freqCondPerSite,
+       aes(x=Site, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Proportion of Samples (in Site)") +
+  theme_classic()
+
+```
+
+```{r}
+
+# Get number of conditions per Plate
+freqCondPerPlate <- melt(data.frame(table(metaCrossSectional[metaCrossSectional$Age_Group == "Child" & metaCrossSectional$Condition != "JIA",][,c("Condition","PLATE")])))
+
+# Get proportion of conditions per Plate
+freqCondPerPlate["Prop"] <- NA
+Plates <- unique(freqCondPerPlate$PLATE)
+for (i in seq_len(length(Plates))) { freqCondPerPlate[freqCondPerPlate$PLATE == Plates[[i]],]["Prop"] <- freqCondPerPlate[freqCondPerPlate$PLATE == Plates[[i]],]$value / sum(freqCondPerPlate[freqCondPerPlate$PLATE == Plates[[i]],]$value) }
+
+# Plot freq
+ggplot(freqCondPerPlate,
+       aes(x=PLATE, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of Samples") +
+  theme_classic()
+
+# Plot prob
+ggplot(freqCondPerPlate,
+       aes(x=PLATE, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Proportion of Samples (in Plate)") +
+  theme_classic()
+
+# Plot freq 
+ggplot(aggregate(value ~ Condition + variable, data=freqCondPerPlate[,c("Condition","value","variable")], FUN=sum),
+       aes(x=variable, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of Samples") +
+  xlab("") + 
+  theme_classic() + theme(axis.text.x=element_blank())
+
+
+```
+
+### Save filtered metadata
+
+```{r}
+
+# Save metadata
+write.table(metaCrossSectional, here::here(diaDir, "filtered", "preSchool_crossSectional_tallFormatClean_samplesFiltered_byMissingness.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(addMetaCross[which(addMetaCross$Sample_ID %in% metaCrossSectional$Sample_ID),], 
+            here::here(diaDir, "filtered", "preSchool_additionalMetadata_commonToCrossSectional_samplesFiltered_byMissingness.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+# Combine Leiden CNO with child cross-sectional data
+metaCrossSectional["Patient_ID"] <- metaCrossSectional$Sample_ID
+metaCrossSectional["Start_Age"] <- metaCrossSectional$Age
+
+```
+
+### Save filtered proteins
+
+```{r}
+
+# Save proteisn
+saveRDS(rownames(quantTable_crossSectional[,metaCrossSectional$Sample_ID]), 
+        here::here(diaDir, "filtered", paste0("filteredProteinSet_crossSectional_maxMissing",maxPropMissing,".rds")))
+
+# Save quant table
+saveRDS(quantTable_crossSectional[,metaCrossSectional$Sample_ID], 
+        here::here(diaDir, "filtered", paste0("filtered_unNormalised_crossSectional_maxMissing",maxPropMissing,".rds")))
+write.table(quantTable_crossSectional[,metaCrossSectional$Sample_ID], 
+            here::here(diaDir, "filtered", paste0("filtered_unNormalised_crossSectional_maxMissing",maxPropMissing,".tsv")), sep="\t", quote=FALSE)
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "02_dataProcessQC_figs.rds"))
+
+```
+
+
+
+

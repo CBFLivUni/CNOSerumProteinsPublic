@@ -1,0 +1,152 @@
+---
+title: "Run Biomarker Selection Combinations"
+format: html
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+here::i_am("08_biomarkerSelectionCombinations.qmd")
+
+# Source parameters, functions and install packages
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Created directory
+
+```{r}
+
+# Create output directorie biomarkers
+here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "subSample_byRandom", "allSamples", "biomarkers")
+
+```
+
+## Main
+
+### Generate combinations
+
+```{r}
+
+# Source params
+source(here::here("params", "biomarkerParams_gridSearch.R"))
+
+# Create grid of combos
+comboGrid <- expand.grid(freqAcrossModels=freqSelect,
+                         freqLassoRuns=freqRuns,
+                         log2ThrVal=log2ThrVal,
+                         candidatePThr=candidatePThr,
+                         imputMethod=imputationMethod)
+comboGrid <- data.frame(cbind(comboGrid[,grepl("Covariate|forceCovariatesInModel|useCommonProts_toPredict",colnames(comboGrid)), drop=FALSE],
+                              apply(comboGrid[,!grepl("Covariate|forceCovariatesInModel|useCommonProts_toPredict",colnames(comboGrid))], 2, as.character)))
+nrow(comboGrid)
+
+```
+
+### Ensure differential expression combinations exist
+
+```{r}
+
+# Get unique differential expression parameters
+dedupComboGrid <- comboGrid[!duplicated(comboGrid[,c("candidatePThr","log2ThrVal")]),c("candidatePThr","log2ThrVal")]
+
+# Loop over combinations
+for (idx in seq_len(nrow(dedupComboGrid))) {
+  
+  # Get file of DA output
+  diffAbFiles <- here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "differentialAbundance", 
+                            paste0("chosenProteins_featureSelection_pThr",format(as.numeric(dedupComboGrid[idx,]$candidatePThr), nsmall=0),
+                                                                  "_treatLog2Thr",format(as.numeric(dedupComboGrid[idx,]$log2ThrVal), nsmall=0),".rds"))
+  
+  # Check if file exists
+  if (!file.exists(diffAbFiles) | reGenerateFiles) { # reGenerateFiles
+    
+    print(paste0("// Running differential expression script with parameterisation:"))
+    print(paste0("// Log2Thr = ",as.character(dedupComboGrid[idx,]$log2ThrVal)))
+    print(paste0("// FDR = ",as.character(dedupComboGrid[idx,]$candidatePThr)))
+    
+    # Run differential expression analysis across parameters
+    suppressMessages(suppressWarnings(
+      system(paste("Rscript 06_differentialAbundance.R",
+                                                     dedupComboGrid[idx,]$candidatePThr, dedupComboGrid[idx,]$log2ThrVal),
+             ignore.stdout = TRUE, ignore.stderr = TRUE)
+    ))
+    
+    
+    print(paste0("Saving to: ", diffAbFiles))
+    checkFile <- file.exists(diffAbFiles)
+    stopifnot("Expected saved file not found\n" = checkFile)
+    
+  }
+  
+}
+
+```
+
+### Loop over combinations and run models
+
+Rank test to see if certain parameter contributions tend to rank highly.
+
+```{r}
+
+# Loop over combinations
+for (idx in seq_len(nrow(comboGrid))) {
+  
+  print(paste0("############################## Parameterisation #",idx," of ",nrow(comboGrid),
+               " :- ",paste(comboGrid[idx,], collapse=", "), " ########################################"))
+  
+  # Remove previous in case
+  file.remove(here::here("params", "runParameters_biomarkerRunSpecific.R"))
+  # Print relevant params to file
+  sink(here::here("params", "runParameters_biomarkerRunSpecific.R"))
+  cat(paste0("freqAcrossModels <- '",comboGrid[idx,"freqAcrossModels"],"'\n"))
+  cat(paste0("freqLassoRuns <- '",comboGrid[idx,"freqLassoRuns"],"'\n"))
+  cat(paste0("imputMethod <- '",comboGrid[idx,"imputMethod"],"'\n"))
+  cat(paste0("candidatePThr <- '",gsub("0[.]10","0.1",comboGrid[idx,"candidatePThr"]),"'\n"))
+  cat(paste0("log2ThrVal <- '",mgsub(comboGrid[idx,"log2ThrVal"], 
+                                     c("0.0", "0.10", "0.20", "0.30", "0.40", "0.50", "1.0"), 
+                                     c("0","0.1","0.2", "0.3", "0.4", "0.5", "1")),"'\n"))
+  sink()
+  
+  # Run analysis
+  runTime <- system.time(suppressWarnings(suppressMessages(source(here::here("07_biomarkerSelection.R")))))
+  
+  # Save time
+  sink(here::here(multiGrpOutDir, "runTime.txt"))
+  cat(runTime)
+  sink()
+  sink(here::here(biModalOutDir, "runTime.txt"))
+  cat(runTime)
+  sink()
+    
+  # Copy parameter files
+  file.copy(from = here::here("params", "runParameters_biomarkerRunSpecific.R"),
+            to   = here::here(multiGrpOutDir, "runParams.R"))
+  file.copy(from = here::here("params", "runParameters_default.R"),
+            to   = here::here(multiGrpOutDir, "defaultParams.R"))
+  
+  file.copy(from = here::here("params", "runParameters_biomarkerRunSpecific.R"),
+            to   = here::here(biModalOutDir, "runParams.R"))
+  file.copy(from = here::here("params", "runParameters_default.R"),
+            to   = here::here(biModalOutDir, "defaultParams.R"))
+  
+  # Remove redundant version of biomarker parameters
+  file.remove(here::here("params", "runParameters_biomarkerRunSpecific.R"))
+
+}
+
+```
+
+
+
+
+
+

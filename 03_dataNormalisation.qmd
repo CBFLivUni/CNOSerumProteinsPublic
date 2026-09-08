@@ -1,0 +1,501 @@
+---
+title: "Data Normalisation"
+format: html
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source metadata
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Load data
+
+```{r}
+
+# Metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata_filtered.R"))
+
+# Abundance tables
+source(here::here("utilities", "R", "codeModules", "data", "unFiltered_quantTables.R"))
+
+# QC tables
+source(here::here("utilities", "R", "codeModules", "data", "unFiltered_serumQCTables.R"))
+
+quantTable_crossSectional
+
+```
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+## Main
+
+### Read in plot list
+
+```{r}
+
+# Save as RDS
+plotList <- readRDS(here::here(figDir, 
+                    "02_dataProcessQC_figs.rds"))
+ 
+```
+
+### Read in filtered by 20% missingness
+
+```{r}
+
+# Read in filtered protein list
+protsCross <- readRDS(here::here(diaDir, "filtered", paste0("filteredProteinSet_crossSectional_maxMissing",maxPropMissing,".rds")))
+
+# Subset data
+rownames(quantTable_crossSectional) <- quantTable_crossSectional$PG.ProteinGroups
+quantTable_crossSectional <- quantTable_crossSectional[protsCross,c("PG.ProteinGroups",metaCrossSectional$Sample_ID)]
+
+dim(quantTable_crossSectional)
+
+```
+
+### Combine with QC samples
+
+```{r}
+
+# Combine data
+quantTable_crossWithQCs <- cbind(quantTable_crossSectional_serumQC[rownames(quantTable_crossSectional),-1], 
+                                 quantTable_crossSectional_instrQC[rownames(quantTable_crossSectional),-1], 
+                                 quantTable_crossSectional)
+
+# Get QC only
+quantTable_crossOnlyQCs <- quantTable_crossWithQCs[,grepl("QC",colnames(quantTable_crossWithQCs))]
+
+```
+
+### NormalyzerDE
+
+#### Format metadata for NormalyzerDE
+
+```{r}
+
+# Sort metadata
+forNormDEMeta <- rename(metaCrossSectional[colnames(quantTable_crossSectional)[-1],c("Sample_ID","Condition","Sex","Age","PLATE")], 
+                         c("Sample_ID"="sample", "Condition"="group", "PLATE"="Plate"))
+
+## Subset metadata
+forNormDEMeta <- rename(metaCrossSectional[colnames(quantTable_crossSectional)[-1],c("Sample_ID","Condition")], 
+                         c("Sample_ID"="sample", "Condition"="group"))
+forNormDEMeta <- rbind(data.frame(sample=c(colnames(quantTable_crossSectional_serumQC)[-1], 
+                                           colnames(quantTable_crossSectional_instrQC)[-1]),
+                                  group=c(rep("Serum_QC", ncol(quantTable_crossSectional_serumQC)-1), 
+                                          rep("Instrument_QC", ncol(quantTable_crossSectional_instrQC)-1))),
+                                  forNormDEMeta)
+
+## Save metadata
+write.table(forNormDEMeta, 
+            here::here(metaDir, "preSchool_crossSectional_groupIsCondition_forNormalyzerDE.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+# Read in QC ID converstion table
+idConvert <- read.table(here::here(metaDir, "serumQCs_idConversionMetadata.tsv"), sep="\t", header=TRUE)
+
+# 
+## Subset metadata
+forNormDEMeta <- rename(metaCrossSectional[colnames(quantTable_crossSectional)[-1],c("Sample_ID","PLATE")], 
+                         c("Sample_ID"="sample", "PLATE"="group"))
+forNormDEMetaQC <- rename(idConvert[idConvert$DATASET == "CrossSectional",c("META_ID","PLATE")], c("META_ID"="sample", "PLATE"="group"))
+forNormDEMeta <- rbind(forNormDEMeta, forNormDEMetaQC, 
+                       data.frame(sample=colnames(quantTable_crossWithQCs)[grepl("Inst",colnames(quantTable_crossWithQCs))], group="PInstr"))
+
+## Save metadata
+write.table(forNormDEMeta, 
+            here::here(metaDir, "preSchool_crossSectional_groupIsPlate_forNormalyzerDE.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+# Save abundance data
+write.table(cbind(PG.ProteinAccessions=rownames(quantTable_crossWithQCs), quantTable_crossWithQCs[,forNormDEMeta$sample]), 
+            here::here(diaDir, "filtered", 
+                       paste0("crossSectional_quantTable.filtBy_serumQCProts_maxMissing",maxPropMissing,".withSerumQCSamples.forNormalyzerDE.tsv")), 
+            sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+#### Run Normalyzer
+
+Based on: https://www.bioconductor.org/packages/release/bioc/vignettes/NormalyzerDE/inst/doc/vignette.html
+
+```{r}
+
+# Create object for NormalyzerDE
+experimentObj_byCond  <- setupRawDataObject(designPath=here::here(metaDir, "preSchool_crossSectional_groupIsCondition_forNormalyzerDE.tsv"), 
+                                            dataPath=here::here(diaDir, "filtered", 
+                                                                paste0("crossSectional_quantTable.filtBy_serumQCProts_maxMissing",maxPropMissing,".withSerumQCSamples.forNormalyzerDE.tsv")))
+experimentObj_byPlate <- setupRawDataObject(designPath=here::here(metaDir, "preSchool_crossSectional_groupIsPlate_forNormalyzerDE.tsv"), 
+                                            dataPath=here::here(diaDir, "filtered", 
+                                                                paste0("crossSectional_quantTable.filtBy_serumQCProts_maxMissing",maxPropMissing,".withSerumQCSamples.forNormalyzerDE.tsv")))
+normObj_byCond <- getVerifiedNormalyzerObject("metaCrossSectional_NormalyzerDE_byCondtion", 
+                                              experimentObj_byCond,
+                                              noLogTransform=TRUE)
+normObj_byPlate <- getVerifiedNormalyzerObject("metaCrossSectional_NormalyzerDE_byPlate", 
+                                               experimentObj_byPlate,
+                                               noLogTransform=TRUE)
+
+# Normalise
+normResults_byCond <- normMethods(normObj_byCond)
+normResults_byPlate <- normMethods(normObj_byPlate)
+
+# Generate performance measures
+normResultsWithEval_byCond <- analyzeNormalizations(normResults_byCond)
+normResultsWithEval_byPlate <- analyzeNormalizations(normResults_byPlate)
+
+# Save results
+jobDir_byCond <-  setupJobDir("metaCrossSectional_NormalyzerDE_byCondition", here::here(diaDir, "normalised"))
+jobDir_byPlate <-  setupJobDir("metaCrossSectional_NormalyzerDE_byPlate", here::here(diaDir, "normalised"))
+writeNormalizedDatasets(normResultsWithEval_byCond, jobDir_byCond)
+writeNormalizedDatasets(normResultsWithEval_byPlate, jobDir_byPlate)
+
+# Plots
+generatePlots(normResultsWithEval_byCond, jobDir_byCond)
+generatePlots(normResultsWithEval_byPlate, jobDir_byPlate)
+
+```
+
+### Read in normalised data
+
+```{r}
+
+# List files
+normFiles <- list.files(path=jobDir_byCond, pattern="*.txt")
+normMs <- lapply(normFiles, function(file) read.table(here::here(jobDir_byCond, file), sep="\t", header=TRUE, row.names=1))
+names(normMs) <- gsub("-.*|.*_|[.]txt","",normFiles)
+
+```
+
+### Check if normalised data with LOESS is unsupervised
+
+Cyclic LOESS may be spliting by group-data to normalise which may be problematic for downstream modelling. Check this by manually normalising nad commparing normalised matrices. Have to round for slight variations in precision of normaliastion.
+
+```{r}
+
+# Check
+cycLoessNorm <- limma::normalizeCyclicLoess(log2(quantTable_crossWithQCs[,forNormDEMeta$sample]), method="fast")
+
+# Get whether LOESS is unsupervisde
+checkLoessUnSupervised <- all(round(as.matrix(cycLoessNorm[,colnames(normMs$CycLoess)]), 8) == round(as.matrix(as.matrix(normMs$CycLoess)), 8), na.rm=TRUE)
+if (!checkLoessUnSupervised) { warning("LOESS APPEARS TO NOT BE UNSUPERVISED, IT MIGHT BE CONSIDERING GROUP DATA")}
+
+```
+
+### Save
+
+```{r}
+
+# Save
+write.table(data.frame(ProteinGroup=rownames(normMs$CycLoess), normMs$CycLoess[,!grepl("QC",colnames(normMs$CycLoess))]), 
+            here::here(diaDir, "normalised", "crossSectional_quantTable_normalisedCyclicLoess.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Process normalised data
+
+```{r}
+
+# Make tall
+normTall <- lapply(names(normMs), function(method) data.frame(reshape2::melt(data.frame(ProtID=rownames(normMs[[method]]), normMs[[method]]), id.vars="ProtID"), Method=method))
+names(normTall) <- names(normMs)
+  
+# Combine
+normTall <- do.call("rbind",normTall)
+
+# Retain only QC samples
+normTall_qcOnly <- normTall[grepl("QC",normTall$variable),]
+
+```
+
+### View normalised distributions as boxplots
+
+```{r, fig.height=3, fig.width=6}
+
+# Get as tall
+rawCrossTall <- melt(data.frame(ID=rownames(quantTable_crossSectional), 
+                                log2(quantTable_crossSectional[,metaCrossSectional$Sample_ID])), id.vars="ID")
+
+# Merge with
+rawCrossTall <- merge(rawCrossTall, metaCrossSectional, by.x="variable", by.y="Sample_ID")
+
+# Get list of colours
+allColors <- list(Sex=sexCols,
+                  Condition=condCols,
+                  Site=siteCols,
+                  PLATE=plateCols)
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","PLATE","Site")) {
+
+  # Plot
+  p1 <- ggplot(rawCrossTall[rawCrossTall$Age_Group == "Child",], 
+               aes(x=variable, 
+                   y=value, 
+                   fill=.data[[fctr]])) + 
+    geom_boxplot(outlier.size=2.5) + 
+    scale_fill_manual(values=allColors[[fctr]]) +
+    xlab("Samples") + ylab("Log2 Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic(base_size=48) + 
+    theme(axis.text.x=element_blank(), 
+          axis.ticks.x=element_blank(),
+          axis.title=element_text(size=72),
+          strip.text=element_blank(),
+          legend.text=element_text(size=28),
+          legend.title=element_blank(),
+          legend.position="top") +
+    guides(fill=guide_legend(nrow=1, 
+                             byRow=TRUE, 
+                             override.aes=list(size=16)))
+  
+  # Save
+  ggsave(here::here(diaDir, "normalised", 
+                    paste0("sampleAbundanceDistribution_splitBy",fctr,"_rawAbundances_childSamples.png")),
+         p1,
+         units="px", width=5000, height=3500)
+
+  if (fctr == "Condition") {
+    
+    # Add to list
+    newList <- list(p1)
+    names(newList) <- c("sampleAbundDistribution_colByCondition_raw")
+    plotList <- append(plotList,
+                       newList)
+    
+  }
+    
+}
+
+```
+
+### Plot
+
+```{r}
+
+# Split by Serum/instrument QC
+normTall_qcOnly["QCType"] <- "Serum QC"
+normTall_qcOnly[grepl("Instrument",normTall_qcOnly$variable),]["QCType"] <- "Instrument QC"
+
+# Split into serum/instrument QC
+serumQC_norm <- normTall_qcOnly[normTall_qcOnly$QCType == "Serum QC",]
+instrQC_norm <- normTall_qcOnly[normTall_qcOnly$QCType == "Instrument QC",]
+
+# Retain only proteins that had missing values to impute missing values
+serumQC_norm_qcOnly <- serumQC_norm[which(serumQC_norm$ProtID %in% 
+                                                    rownames(quantTable_crossOnlyQCs[,!grepl("Instrument",colnames(quantTable_crossOnlyQCs))])),]
+instrQC_norm_qcOnly <- instrQC_norm[which(instrQC_norm$ProtID %in% 
+                                                    rownames(quantTable_crossOnlyQCs[, grepl("Instrument",colnames(quantTable_crossOnlyQCs))])),]
+  
+# Plot
+serumQC_plt <- ggplot(serumQC_norm_qcOnly, aes(x=variable, y=log2(value))) + 
+         geom_boxplot(outlier.size=2.5) + ggtitle("Serum QC Samples Only") +
+         xlab("QC Sample") + ylab("Log2 Protein Abundance") +
+         facet_wrap(~ Method, ncol=4) +
+         theme_classic(base_size=16) + 
+         theme(axis.text=element_blank(),
+               axis.title=element_text(size=48),
+               plot.title=element_text(size=64),
+               strip.text=element_text(size=32))
+instrQC_plt <- ggplot(instrQC_norm_qcOnly, aes(x=variable, y=log2(value))) + 
+         geom_boxplot(outlier.size=2.5) + ggtitle("Instrument QC Samples Only") +
+         xlab("QC Sample") + ylab("Log2 Protein Abundance") +
+         facet_wrap(~ Method, ncol=4) +
+         theme_classic(base_size=16) + 
+         theme(axis.text=element_blank(),
+               axis.title=element_text(size=48),
+               plot.title=element_text(size=64),
+               strip.text=element_text(size=32))
+
+# Save
+dir.create(here::here(diaDir, "normalised", "metaCrossSectional_NormalyzerDE_byCondition", "QC"), showWarnings=FALSE, recursive=TRUE)
+ggsave(here::here(diaDir, "normalised", "metaCrossSectional_NormalyzerDE_byCondition", "QC", 
+                  "normalisationMethod_boxplotDistCheck_serumQCOnly_allProteins.png"), serumQC_plt, units="px", width=10000, height=6000)
+ggsave(here::here(diaDir, "normalised", "metaCrossSectional_NormalyzerDE_byCondition", "QC", 
+                  "normalisationMethod_boxplotDistCheck_instrumentQCOnly_allProteins.png"), instrQC_plt, units="px", width=10000, height=6000)
+
+
+# Retain only proteins that had missing values to impute missing values
+serumQC_norm_qcOnly <- serumQC_norm[which(serumQC_norm$ProtID %in% 
+                                                    rownames(quantTable_crossOnlyQCs[is.na(rowSums(quantTable_crossOnlyQCs)),!grepl("Instrument",colnames(quantTable_crossOnlyQCs))])),]
+instrQC_norm_qcOnly <- instrQC_norm[which(instrQC_norm$ProtID %in% 
+                                                    rownames(quantTable_crossOnlyQCs[is.na(rowSums(quantTable_crossOnlyQCs)), grepl("Instrument",colnames(quantTable_crossOnlyQCs))])),]
+  
+# Plot
+serumQC_plt <- ggplot(serumQC_norm_qcOnly, aes(x=variable, y=log2(value))) + 
+         geom_boxplot(outlier.size=2.5) + ggtitle("Serum QC Samples Only") +
+         xlab("QC Sample") + ylab("Log2 Protein Abundance") +
+         facet_wrap(~ Method, ncol=4) +
+         theme_classic(base_size=16) + 
+         theme(axis.text=element_blank(),
+               axis.title=element_text(size=48),
+               plot.title=element_text(size=64),
+               strip.text=element_text(size=32))
+instrQC_plt <- ggplot(instrQC_norm_qcOnly, aes(x=variable, y=log2(value))) + 
+         geom_boxplot(outlier.size=2.5) + ggtitle("Instrument QC Samples Only") +
+         xlab("QC Sample") + ylab("Log2 Protein Abundance") +
+         facet_wrap(~ Method, ncol=4) +
+         theme_classic(base_size=16) + 
+         theme(axis.text=element_blank(),
+               axis.title=element_text(size=48),
+               plot.title=element_text(size=64),
+               strip.text=element_text(size=32))
+
+# Save
+ggsave(here::here(diaDir, "normalised", "metaCrossSectional_NormalyzerDE_byCondition", "QC", 
+                  "normalisationMethod_boxplotDistCheck_serumQCOnly_protsWithNAOnly.png"), serumQC_plt, units="px", width=10000, height=6000)
+ggsave(here::here(diaDir, "normalised", "metaCrossSectional_NormalyzerDE_byCondition", "QC", 
+                  "normalisationMethod_boxplotDistCheck_instrumentQCOnly_protsWithNAOnly.png"), instrQC_plt, units="px", width=10000, height=6000)
+
+```
+
+#### PCA to investigate
+
+```{r}
+
+# Edit Colours
+tidyCondCols <- condCols
+names(tidyCondCols) <- gsub("Infectious.","Inf. ",names(tidyCondCols))
+
+# Make column categorical
+metaCrossSectional$COLUMN <- as.character(metaCrossSectional$COLUMN)
+
+# Fix infectious osteomyelitis
+metaCrossSectional$Condition <- gsub("Infectious ","Inf. ",metaCrossSectional$Condition)
+
+```
+
+#### Prepare data
+
+```{r}
+
+# Extract normalised data
+normData <- normMs$CycLoess
+
+# Drop QCs
+normData <- normData[,!grepl("QC",colnames(normData))]
+
+# Drop NAs
+normData_noNA <- normData[!is.na(rowSums(normData)),]
+dim(normData_noNA)
+
+```
+
+### View normalised distributions as boxplots
+
+```{r, fig.height=3, fig.width=6}
+
+# Get as tall
+normCrossTall <- melt(data.frame(ID=rownames(normMs$CycLoess), 
+                                normMs$CycLoess[,metaCrossSectional$Sample_ID]), id.vars="ID")
+
+# Merge with
+normCrossTall <- merge(normCrossTall, metaCrossSectional, by.x="variable", by.y="Sample_ID")
+
+# Get list of colours
+allColors <- list(Sex=sexCols,
+                  Condition=condCols,
+                  Site=siteCols,
+                  PLATE=plateCols)
+
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","PLATE","Site")) {
+
+  # Plot
+  p1 <- ggplot(normCrossTall[normCrossTall$Age_Group == "Child",], 
+               aes(x=variable, 
+                   y=value, 
+                   fill=.data[[fctr]])) + 
+    geom_boxplot(outlier.size=2.5) + 
+    scale_fill_manual(values=allColors[[fctr]]) +
+    xlab("Samples") + ylab("Log2 Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic(base_size=48) + 
+    theme(axis.text.x=element_blank(), 
+          axis.ticks.x=element_blank(),
+          axis.title=element_text(size=72),
+          strip.text=element_blank(),
+          legend.text=element_text(size=28),
+          legend.title=element_blank(),
+          legend.position="top") +
+    guides(fill=guide_legend(nrow=1, 
+                             byRow=TRUE, 
+                             override.aes=list(size=16)))
+  
+  # Save
+  ggsave(here::here(diaDir, "normalised", 
+                    paste0("sampleAbundanceDistribution_splitBy",fctr,"_cycLoessNormAbundances_childSamples.png")),
+         p1,
+         units="px", width=5000, height=3500)
+
+  if (fctr == "Condition") {
+    
+    # Add to list
+    newList <- list(p1)
+    names(newList) <- c("sampleAbundDistribution_colByCondition_cyclicLoessNorm")
+    plotList <- append(plotList,
+                       newList)
+    
+  }
+  
+}
+
+```
+
+#### All Samples
+
+```{r}
+
+# Run PCA
+crossPCA <- prcomp(t(normData_noNA[!is.na(rowSums(normData_noNA)),metaCrossSectional$Sample_ID]), center=TRUE, scale=TRUE)
+
+# Merge with metadata
+crossPCA_metaData <- merge(metaCrossSectional[,!grepl("^PC",colnames(metaCrossSectional))], crossPCA$x, by.x="Sample_ID", by.y="row.names")
+
+```
+
+#### Child Samples
+
+```{r}
+
+# Subset metadata
+metaCrossSectional_child <- metaCrossSectional[metaCrossSectional$Age_Group == "Child",]
+
+# Run PCA
+crossChildPCA <- prcomp(t(normData_noNA[!is.na(rowSums(normData_noNA)),metaCrossSectional_child$Sample_ID]), center=TRUE, scale=TRUE)
+
+# Merge with metadata
+crossChildPCA_metaData <- merge(metaCrossSectional_child[,!grepl("^PC",colnames(metaCrossSectional_child))], crossChildPCA$x, by.x="Sample_ID", by.y="row.names")
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "03_dataNormalisation_figs.rds"))
+
+```
+
+
+
+

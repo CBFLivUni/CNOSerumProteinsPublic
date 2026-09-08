@@ -1,0 +1,778 @@
+---
+title: "Metadata Cleaning"
+author: "Euan McDonnell"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+```{r}
+
+# Get here if required
+if (!require("here", quietly = TRUE)) { install.packages("here") }
+
+# Source metadata
+here::i_am("01_cleanMetadata.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+## Main Code
+
+### Read in metadata
+
+```{r}
+
+# Read in metadata
+## Cross-sectional
+metaCrossSectional_discoData  <- read_xlsx(here::here(baseMetaDir, "preSchool_crossSectional_tallFormat.xlsx"), sheet=1)
+metaCrossSectional_validData  <- read_xlsx(here::here(baseMetaDir, "preSchool_crossSectional_tallFormat.xlsx"), sheet=2)
+
+# Read in liveprool collection dates
+livDates <- read.table(here::here(baseMetaDir, "liverpoolCollectionDates.tsv"), sep="\t", header=TRUE)
+livDates_valid <- data.frame(read_xlsx(here::here(baseMetaDir, "metaDataValidation_withLiverpoolDates.xlsx"), sheet=2))
+livDates_valid <- livDates_valid[livDates_valid$Data.Group == "Validation" &
+                                 !is.na(livDates_valid$Date.of.collection) &
+                                 livDates_valid$Condition == "Healthy",]
+livDates_valid <- livDates_valid[,c(1, 10)]
+colnames(livDates_valid) <- c("Sample_ID", "Date.of.sample")
+
+```
+
+### Read in additional metadata
+
+```{r}
+
+# Read in additional metadata
+addMeta <- lapply(seq(2,8), function(sht) data.frame(read_xlsx(here::here(baseMetaDir, "preSchool_masterSpreadsheet.xlsx"), sheet=sht)))
+
+# Tidy names and remove unique columns
+for (i in seq_len(length(addMeta))) { 
+  
+  # Fix columnames
+  colnames(addMeta[[i]]) <- gsub(" ",".",colnames(addMeta[[i]])) 
+
+  # Remove mismatched columns
+  addMeta[[i]] <- addMeta[[i]][,!grepl("Notes|Rack",colnames(addMeta[[i]]))]
+  
+}
+
+# Sort dates
+addMeta[[1]]$Date.of.sample <- lubridate::dmy(addMeta[[1]]$Date.of.sample)
+livDates$Date.of.sample <- lubridate::dmy(livDates$Date.of.sample)
+livDates_valid$Date.of.sample <- lubridate::dmy(livDates_valid$Date.of.sample)
+
+# Format
+addMeta <- do.call("rbind", addMeta)
+
+# Set "NK to NA
+for (colVal in colnames(addMeta)) { if ("NK" %in% addMeta[[colVal]]) { print(colVal); addMeta[addMeta[[colVal]] == "NK" & !is.na(addMeta[[colVal]]),][[colVal]] <- NA } }
+
+```
+
+### Tidy condition names
+
+```{r}
+
+# Change condition names to more correct/manageable
+metaCrossSectional_discoData$Condition <- mgsub(metaCrossSectional_discoData$Condition,
+                                                    c("Crohns", "Infectious Osteomyelitis"),
+                                                    c("Crohn",  "InfOsteitis"))
+metaCrossSectional_validData$Condition <- mgsub(metaCrossSectional_validData$Condition,
+                                                c("Crohns", "Infectious Osteomyelitis"),
+                                                c("Crohn",  "InfOsteitis"))
+
+```
+
+### Fix variables
+
+```{r}
+
+# Loop over columns and fix repeat symbols
+for (colVal in colnames(addMeta)) { 
+
+  # Fix values
+  addMeta[[colVal]] <- FixRepeatSymbols(data=addMeta[[colVal]], repeatVals=c("\\", "/"))  
+  
+}
+
+```
+
+### Rename wonky columns
+
+```{r}
+
+# Rename spaces
+colnames(metaCrossSectional_discoData) <- gsub("-| ","_",colnames(metaCrossSectional_discoData))
+colnames(metaCrossSectional_discoData) <- gsub("[.]","_",colnames(metaCrossSectional_discoData))
+colnames(metaCrossSectional_validData) <- gsub("-| ","_",colnames(metaCrossSectional_validData))
+colnames(metaCrossSectional_validData) <- gsub("[.]","_",colnames(metaCrossSectional_validData))
+
+```
+
+### Make time in years
+
+```{r}
+
+# additional metadata
+addMeta[grepl("DATE|[?]",addMeta$Date.of.sample),] <- NA
+addMeta$Sex <- toupper(addMeta$Sex)
+
+```
+
+### Investigate IDs
+
+#### Check for duplicate IDs
+
+```{r}
+
+# Check IDs
+nSampleIDs <- unlist(c(table(metaCrossSectional_discoData$Sample_ID)))
+nSampleIDs[nSampleIDs > 1] # Only "MISSING" duplicated, this is fine
+
+# Exclude missing
+metaCrossSectional_discoData <- metaCrossSectional_discoData[metaCrossSectional_discoData$Sample_ID != "MISSING",]
+
+```
+
+#### Rename wonky IDs
+
+```{r}
+
+# Rename
+metaCrossSectional_discoData$Sample_ID <- gsub("___","_",mgsub(metaCrossSectional_discoData$Sample_ID, c(" ","-","#"),c("_","_","")))
+metaCrossSectional_discoData$Sample_ID <- gsub("___","_",mgsub(metaCrossSectional_discoData$Sample_ID, c(" ","-","#"),c("_","_","")))
+metaCrossSectional_validData$Sample_ID <- gsub("___","_",mgsub(metaCrossSectional_validData$Sample_ID, c(" ","-","#"),c("_","_","")))
+metaCrossSectional_validData$Sample_ID <- gsub("___","_",mgsub(metaCrossSectional_validData$Sample_ID, c(" ","-","#"),c("_","_","")))
+
+# Fix IDs
+addMeta$Preschool.sample.ID <- gsub("[*]","",addMeta$Preschool.sample.ID)
+addMeta$Preschool.sample.ID <- gsub("___","_",mgsub(addMeta$Preschool.sample.ID, c(" ","-","#"),c("_","_","")))
+livDates$Sample_ID <- gsub("[*]","",livDates$Sample_ID)
+livDates$Sample_ID <- gsub("___","_",mgsub(livDates$Sample_ID, c(" ","-","#"),c("_","_","")))
+
+addMeta[order(addMeta$Preschool.sample.ID, decreasing=TRUE),]
+metaCrossSectional_discoData[order(metaCrossSectional_discoData$Sample_ID, decreasing=TRUE),]
+
+# Add condition as summarised diagnosis
+addMeta["Condition"] <- "Oncology"
+addMeta$Diagnosis <- gsub(" [Cc]ontrol","",addMeta$Diagnosis)
+addMeta[grepl("Infectious osteomyelitis", addMeta$Diagnosis),]["Diagnosis"] <- "InfOsteitis"
+addMeta[grepl("Crohn", addMeta$Diagnosis),]["Diagnosis"] <- "Crohn"
+addMeta[which(addMeta$Diagnosis %in% c("CNO","Healthy","Hyperphosphatasia","InfOsteitis","Crohn")),]["Condition"] <- addMeta[which(addMeta$Diagnosis %in% c("CNO","Healthy","Hyperphosphatasia","InfOsteitis","Crohn")),]$Diagnosis
+table(addMeta$Condition)
+
+# Fix weeks 
+addMeta[grepl("eeks",addMeta$Age),]["Age"] <- round(as.numeric(gsub(" [W,w]eeks","",addMeta[grepl("eeks",addMeta$Age),]$Age)) / 52.1775, 1)
+
+```
+
+### Standardise ethnicities
+
+```{r}
+
+# Rename
+metaCrossSectional_discoData$Ethnicity <- gsub("american","American",metaCrossSectional_discoData$Ethnicity)
+metaCrossSectional_discoData[metaCrossSectional_discoData$Ethnicity == "NK" & !is.na(metaCrossSectional_discoData$Ethnicity),]["Ethnicity"] <- NA
+metaCrossSectional_validData$Ethnicity <- gsub("american","American",metaCrossSectional_validData$Ethnicity)
+metaCrossSectional_validData[metaCrossSectional_validData$Ethnicity == "NK" & !is.na(metaCrossSectional_validData$Ethnicity),]["Ethnicity"] <- NA
+
+```
+
+#### Exclude conditions
+
+```{r}
+
+# If we want to remove a condition (JIA mostly)
+if (length(excludeConditions) > 0 | !is.null(excludeConditions)) {
+
+  # Drop for train/test data
+  metaCrossSectional_discoData <- metaCrossSectional_discoData[!metaCrossSectional_discoData$Condition %in% excludeConditions,]
+  
+  # Drop for validation data
+  metaCrossSectional_validData <- metaCrossSectional_validData[!metaCrossSectional_validData$Condition %in% excludeConditions,]
+  
+}
+
+```
+
+### Plotting factors
+
+#### Age
+
+```{r, fig.height=5, fig.width=12}
+
+# Cross-sectional
+## Distribution
+metaCrossSectional_discoData$Age <- as.numeric(metaCrossSectional_discoData$Age)
+hist(metaCrossSectional_discoData[metaCrossSectional_discoData$Age_Group == "Child",]$Age)
+hist(metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child",]$Age)
+
+## Age/Sex split
+p1 <- ggplot(metaCrossSectional_discoData[metaCrossSectional_discoData$Age_Group == "Child",], aes(y=Age, x=Sex, fill=Sex)) + 
+  geom_boxplot(fill="white", width=0.25) +
+  geom_beeswarm(alpha=0.65, shape=21) + 
+  geom_hline(yintercept=0, linetype="dashed", color="darkgrey") +
+  facet_grid(cols=vars(Condition), scale="free_x", space="free_x") +
+  scale_fill_manual(values=c("darkorange","mediumpurple")) +
+  xlab("Sex") +
+  ggtitle("Cross-Sectional Study (Children)") +
+  theme_classic() + theme(legend.title=element_blank())
+p1
+
+```
+
+#### Site in relation to other features
+
+### Convert between Plate Coordinate ID to metadata ID
+
+#### Read in Coord-to-metadata ID conversions
+
+```{r}
+
+# Read in ID conversion table
+idConvertCross <- read_xlsx(here::here(baseMetaDir, "preSchoolProject_crossSectional_plateInfo.xlsx"), sheet=2)
+idConvertValid <- read_xlsx(here::here(baseMetaDir, "Validation_crosssectional_plates_randomised_08042025.xlsx"), sheet=2)
+
+# Melt to tall format
+idConvertCross <- reshape2::melt(idConvertCross, id.vars="ID")
+idConvertValid <- reshape2::melt(idConvertValid, id.vars=c("PLATE","ROW"))
+colnames(idConvertCross) <- c("PLATE_COORD","COLUMN","META_ID")
+colnames(idConvertValid) <- c("PLATE", "ROW", "COLUMN", "META_ID")
+
+# Get plate coordinate for validation data
+idConvertValid["PLATE_COORD"] <- paste0(idConvertValid$PLATE, "_", idConvertValid$ROW, idConvertValid$COLUMN)
+idConvertValid <- idConvertValid[,c("PLATE_COORD", "COLUMN", "META_ID", "PLATE", "ROW")]
+
+# Drop NAs
+idConvertCross  <- idConvertCross[!is.na(idConvertCross$META_ID),]
+idConvertValid  <- idConvertValid[!is.na(idConvertValid$META_ID),]
+
+# Make matching to quantification table
+idConvertCross$PLATE_COORD <- gsub("P0","P",paste0(gsub("[-]","_",idConvertCross$PLATE_COORD), idConvertCross$COLUMN))
+rownames(idConvertCross) <- idConvertCross$PLATE_COORD
+rownames(idConvertValid) <- idConvertValid$PLATE_COORD
+max(table(idConvertCross$PLATE_COORD))
+max(table(idConvertValid$PLATE_COORD))
+
+# Add specific Plate ID/Column
+idConvertCross["PLATE"] <- gsub("_.*","",idConvertCross$PLATE_COORD)
+idConvertCross["ROW"] <- gsub(".*_|[0-9]*","",idConvertCross$PLATE_COORD)
+
+# Discard validation coordinates with no sample
+idConvertValid <- idConvertValid[idConvertValid$META_ID != "no sample",]
+
+# Extract QCs
+idConvertCrossQCs <- idConvertCross[grepl("QC",idConvertCross$META_ID),]
+
+```
+
+#### Read in proteomics table
+
+```{r}
+
+# Read in pivot table
+quantTable_crossSectional <- read.table(here::here(baseDiaDir, "spectronaut", "20240716_091619_crossSectionalOnly", 
+                                                   "crossSectionalOnly_Report_Protein Quant (Pivot).tsv"), sep="\t", quote="\"", header=TRUE)
+quantTable_validData <- read.table(here::here(baseValidDir, "DIAProteomics", "directDIA_spectronautProcessed", "spectronaut", "20250409_PreSchool_2_20250312_ValidationData", 
+                                              "2022_0105d_PreSchool_2_20250312_ValidationData_Report_Protein Quant (Pivot).tsv"), sep="\t", quote="\"", header=TRUE)
+rownames(quantTable_crossSectional) <- quantTable_crossSectional$PG.ProteinGroups
+rownames(quantTable_validData) <- quantTable_validData$PG.ProteinGroups
+dim(quantTable_crossSectional)
+dim(quantTable_validData)
+
+# Drop BLANK
+quantTable_crossSectional <- quantTable_crossSectional[,!grepl("BLANK",colnames(quantTable_crossSectional))]
+quantTable_validData <- quantTable_validData[,!grepl("BLANK", colnames(quantTable_validData))]
+
+# Set column names to plate coord-only IDs
+colnames(quantTable_crossSectional) <- gsub(".*300424_|.*100524_|.*290524_|_*[0-9]uL.*","",colnames(quantTable_crossSectional))
+colnames(quantTable_validData) <- gsub(".*022.0105d_|_[0-9]ul.*|[.]d[.]PG.*","",colnames(quantTable_validData))
+
+# Save all samples with serum QCs (has plate coords as IDs)
+write.table(quantTable_crossSectional, 
+            here::here(diaDir, "processed", "crossSectional_pivotTable_PGQuantity.plateCoords_withSerumQCs.tsv"), 
+            sep="\t", quote=FALSE, row.names=FALSE)
+write.table(quantTable_validData, 
+            here::here(diaDir, "processed", "validationData_pivotTable_PGQuantity.plateCoords_withSerumQCs.tsv"), 
+            sep="\t", quote=FALSE, row.names=FALSE)
+
+# Check no ids of interest are missing and get those of interest
+colnames(quantTable_crossSectional)[!colnames(quantTable_crossSectional) %in% rownames(idConvertCross)]
+colnames(quantTable_validData)[!colnames(quantTable_validData) %in% rownames(idConvertValid)]
+chosenCrossIDs <- colnames(quantTable_crossSectional)[which(colnames(quantTable_crossSectional) %in% rownames(idConvertCross))]
+chosenValidIDs <- colnames(quantTable_validData)[which(colnames(quantTable_validData) %in% rownames(idConvertValid))]
+if (length(chosenCrossIDs) != nrow(idConvertCross) | all(chosenCrossIDs %in% idConvertCross$META_ID)) { warning("Number of IDs do not match between conversion and quantification tables, or IDs do not match") }
+if (length(chosenValidIDs) != nrow(idConvertValid) | all(chosenValidIDs %in% idConvertValid$META_ID)) { warning("Number of IDs do not match between conversion and quantification tables, or IDs do not match") }
+
+
+```
+
+#### Fix IDs
+
+```{r}
+
+# Edit metadata IDs
+idConvertValid$META_ID <- mgsub(idConvertValid$META_ID,
+                                c("-"," [#]","^AC"),
+                                c("_","_","AC_healthycontrol_AC"))
+metaCrossSectional_validData$Sample_ID <- gsub("-","_",metaCrossSectional_validData$Sample_ID)
+metaCrossSectional_validData$Sample_ID <- gsub("thy_con","thycon",metaCrossSectional_validData$Sample_ID)
+metaCrossSectional_validData$Sample_ID <- gsub("Healthy","healthy",metaCrossSectional_validData$Sample_ID)
+
+# Fix mis-labelled IDs
+metaCrossSectional_validData[metaCrossSectional_validData$Sample_ID == "PS_DR_434",]["Sample_ID"] <- "PS_DR_440"
+metaCrossSectional_validData[metaCrossSectional_validData$Sample_ID == "AC_healthycontrol_missing",]["Sample_ID"] <- "AC_healthycontrol_AC35"
+
+inConvertNotInMeta <- setdiff(idConvertValid$META_ID,
+                              metaCrossSectional_validData$Sample_ID)
+inMetaNotInConvert <- setdiff(metaCrossSectional_validData$Sample_ID,
+                              idConvertValid$META_ID)
+
+# Check missing valeus
+if (length(inMetaNotInConvert) > 0) { stop("Missing values in metadata not in ID conversion table") }
+
+# Read in CPR plate metadata
+validPlateMeta <- read_xlsx(here::here(baseMetaDir, "Validation_crosssectional_plates_randomised_08042025.xlsx"), sheet=3)
+validPlateMeta$sampleID <- mgsub(validPlateMeta$sampleID,
+                                 c("-"," [#]","^AC"),
+                                 c("_","_","AC_healthycontrol_AC"))
+
+# Check missing values are hyperphosphatasia
+missingSamples <- validPlateMeta[which(validPlateMeta$sampleID %in% inConvertNotInMeta),]
+
+```
+
+#### Get validation QC samples
+
+```{r}
+
+# Get QC samples from abundance data
+quantTable_validDataQCs <- quantTable_validData[,grepl("PooledPlasma",colnames(quantTable_validData))]
+
+# Make dataframe
+idConvertValidQCs <- data.frame(PLATE_COORD=NA,
+                                COLUMN=gsub(".*S1[.]|_[0-9]*|A","",colnames(quantTable_validDataQCs)),
+                                META_ID=colnames(quantTable_validDataQCs),
+                                ROW=gsub(".*S1[.]|_[0-9]*|[0-9]","",colnames(quantTable_validDataQCs)),
+                                PLATE=NA)
+
+
+```
+
+#### Save QC data
+
+```{r}
+
+# Save ID conversion
+write.table(rbind(data.frame(DATASET="CrossSectional",idConvertCrossQCs),
+                  data.frame(DATASET="ValidData",idConvertValidQCs)),
+            here::here(metaDir, "serumQCs_idConversionMetadata.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+# Save tables
+## Serum QC
+write.table(quantTable_crossSectional[,c("PG.ProteinGroups", idConvertCrossQCs$PLATE_COORD)],  
+            here::here(diaDir, "processed", "QCs", "crossSectional_pivotTable_PGQuantity.plateCoords_justSerumQCs.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(quantTable_validData[,grepl("PG.ProteinGroups|PooledPlasma", colnames(quantTable_validData))],  
+            here::here(diaDir, "processed", "QCs", "validationData_pivotTable_PGQuantity.plateCoords_justSerumQCs.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+## Instrument QC
+write.table(quantTable_crossSectional[,c("PG.ProteinGroups", colnames(quantTable_crossSectional)[grepl("nstrument",colnames(quantTable_crossSectional))])],  
+            here::here(diaDir, "processed", "QCs", "crossSectional_pivotTable_PGQuantity.justInstrumentQCs.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Save unclean metadata
+
+```{r}
+
+# Save metadata
+write.table(metaCrossSectional_discoData, 
+            here::here(metaDir, "preSchool_crossSectional_allSamples_unClean.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+#### Add ID conversion to metadata
+
+```{r}
+
+# Fix IDs
+## Cross-sectional
+idConvertCross$META_ID <- mgsub(idConvertCross$META_ID, c("[-]|[#]"," ","Heal","ealthy_control"),c("_","","heal","ealthycontrol"))
+metaCrossSectional_discoData$Sample_ID <- mgsub(metaCrossSectional_discoData$Sample_ID, c("Heal","AC_55","AC_38","ealthy_control"),c("heal","AC55","AC38","ealthycontrol"))
+
+idConvertCross$META_ID <- gsub("Heal","heal",idConvertCross$META_ID)
+metaCrossSectional_discoData$Sample_ID <- gsub("Heal","heal",metaCrossSectional_discoData$Sample_ID)
+metaCrossSectional_discoData$Sample_ID <- gsub("AC_55","AC55",metaCrossSectional_discoData$Sample_ID)
+
+# Combine edited names
+idConvert <- idConvertCross
+
+# Drop QCs
+idConvertCross <- idConvertCross[!grepl("QC",idConvertCross$META_ID),]
+
+# Drop "BLANK"
+idConvertCross <- idConvertCross[idConvertCross$META_ID != "BLANK",]
+
+# Combine edited names
+idConvert_noQCs <- rbind(idConvertCross)
+
+# Check overlaps
+### In abundance not in metadata - secpected some missing here - JIA etc
+if (length(setdiff(idConvertCross$META_ID, metaCrossSectional_discoData$Sample_ID)) > 0) { warning(paste0("Missing IDs in abundance data not in Cross-Sectional metadata :- ",
+                                                                                                paste(setdiff(idConvertCross$META_ID, metaCrossSectional_discoData$Sample_ID), collapse=", "))) }
+
+```
+
+### Merge ID conversions to correct
+
+```{r}
+
+# Combine ID conversion with metadata
+metaCrossSectional_discoData <- merge(metaCrossSectional_discoData, idConvertCross, by.x="Sample_ID", by.y="META_ID")
+metaCrossSectional_validData <- merge(metaCrossSectional_validData, idConvertValid, by.x="Sample_ID", by.y="META_ID")
+
+```
+
+### Save ID Conversion
+
+```{r}
+
+# Subset to just samples
+idConvertCross <- idConvertCross[which(idConvertCross$PLATE_COORD %in% colnames(quantTable_crossSectional)),]
+idConvertValid <- idConvertValid[which(idConvertValid$PLATE_COORD %in% colnames(quantTable_validData)),]
+
+# Save
+write.table(rbind(idConvertCross,
+                  idConvertValid),
+            here::here(metaDir, "idConversionProcessed.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Save ID converted QC samples
+
+```{r}
+
+# Get full quant table with all samples and plate coordinate column names
+colnames(quantTable_crossSectional) <- gsub(".*300424_|.*100524_|.*290524_|_*[0-9]uL.*","",colnames(quantTable_crossSectional))
+colnames(quantTable_validData) <- gsub(".*300424_|.*100524_|.*290524_|_*[0-9]uL.*","",colnames(quantTable_validData))
+colnames(quantTable_crossSectional)
+colnames(quantTable_validData)
+
+# Change column IDs to sample names
+quantTable_crossSectionalQC <- cbind(PG.ProteinGroups=quantTable_crossSectional$PG.ProteinGroups, quantTable_crossSectional[,idConvertCrossQCs$PLATE_COORD])
+colnames(quantTable_crossSectionalQC) <- c("PG.ProteinGroups", idConvertCrossQCs$META_ID)
+
+# Save non-QC samples with sample ID names
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "processed", "QCs"))
+write.table(quantTable_crossSectionalQC[,c("PG.ProteinGroups", idConvertCrossQCs$META_ID)],  
+            here::here(diaDir, "processed", "QCs", "crossSectional_pivotTable_PGQuantity.sampleIDs_justSerumQCs.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(quantTable_validData[,grepl("PG.ProteinGroups|PooledPlasma", colnames(quantTable_validData))],  
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "processed", "QCs", "validData_pivotTable_PGQuantity.sampleIDs_justSerumQCs.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Convert IDs
+
+```{r}
+
+# Get full quant table with all samples and plate coordinate column names
+colnames(quantTable_crossSectional) <- gsub(".*300424_|.*100524_|.*290524_|_*[0-9]uL.*","",colnames(quantTable_crossSectional))
+colnames(quantTable_crossSectional)
+
+# Update rownames for subsetting
+rownames(metaCrossSectional_discoData) <- metaCrossSectional_discoData$PLATE_COORD
+rownames(metaCrossSectional_validData) <- metaCrossSectional_validData$PLATE_COORD
+
+# Change column IDs to sample names
+quantTable_crossSectional <- cbind(PG.ProteinGroups=quantTable_crossSectional$PG.ProteinGroups, quantTable_crossSectional[,idConvertCross$PLATE_COORD])
+quantTable_validData <- cbind(PG.ProteinGroups=quantTable_validData$PG.ProteinGroups, quantTable_validData[,idConvertValid$PLATE_COORD])
+colnames(quantTable_crossSectional) <- c("PG.ProteinGroups", idConvertCross$META_ID)
+colnames(quantTable_validData) <- c("PG.ProteinGroups", idConvertValid$META_ID)
+
+```
+
+### Match metadata and quantification
+
+```{r}
+
+# Get lists of common IDs
+commonCrossIDs <- intersect(colnames(quantTable_crossSectional), metaCrossSectional_discoData$Sample_ID); length(commonCrossIDs)
+commonValidIDs <- intersect(colnames(quantTable_validData), metaCrossSectional_validData$Sample_ID); length(commonValidIDs)
+
+# Metadata
+metaCrossSectional_discoData <- metaCrossSectional_discoData[which(metaCrossSectional_discoData$Sample_ID %in% commonCrossIDs),]
+metaCrossSectional_validData <- metaCrossSectional_validData[which(metaCrossSectional_validData$Sample_ID %in% commonValidIDs),]
+
+```
+
+#### Add site data
+
+DR = Dresden, Germany
+VA = Vanderbilt University, Tennessee, US
+Healthy controls listed as 'AC' - Liverpool, UK
+The samples starting with J were all taken from the JSLE study
+
+```{r}
+
+# Add as column
+metaCrossSectional_discoData["Site"] <- NA
+metaCrossSectional_discoData[grepl("_VA_",metaCrossSectional_discoData$Sample_ID),]["Site"] <- "Vanderbilt"
+metaCrossSectional_discoData[grepl("_DR_",metaCrossSectional_discoData$Sample_ID),]["Site"] <- "Dresden"
+metaCrossSectional_discoData[grepl("^J|^C",metaCrossSectional_discoData$Sample_ID),]["Site"] <- "Liverpool"
+
+table(metaCrossSectional_discoData$Site)
+metaCrossSectional_discoData[is.na(metaCrossSectional_discoData$Site),]
+
+metaCrossSectional_validData["Site"] <- NA
+metaCrossSectional_validData[grepl("_VA_",metaCrossSectional_validData$Sample_ID),]["Site"] <- "Vanderbilt"
+metaCrossSectional_validData[grepl("_DR_",metaCrossSectional_validData$Sample_ID),]["Site"] <- "Dresden"
+metaCrossSectional_validData[grepl("^J|^C",metaCrossSectional_validData$Sample_ID),]["Site"] <- "Liverpool"
+
+```
+
+#### Plot site in relation to other features
+
+##### Cross-sectional data
+
+```{r, fig.width=20, fig.height=8}
+
+# Enumerate smaples per site per condition
+metaCrossSectional_child <- metaCrossSectional_discoData[metaCrossSectional_discoData$Age_Group == "Child",]
+sitePerCondition <- data.frame(table(metaCrossSectional_child[,c("Site","Condition")]))
+sitePerCondition["Prop"] <- NA
+platePerCondition <- data.frame(table(metaCrossSectional_child[,c("PLATE","Condition")]))
+platePerCondition["Prop"] <- NA
+sitePerPlate <- data.frame(table(metaCrossSectional_child[,c("Site","PLATE")]))
+sitePerPlate["Prop"] <- NA
+for (site in unique(sitePerCondition$Site)) { 
+  
+  # Calculate proportion of condition samples in site
+  sitePerCondition[sitePerCondition$Site == site,]["Prop"] <- sitePerCondition[sitePerCondition$Site == site,]$Freq / 
+                                                              sum(sitePerCondition[sitePerCondition$Site == site,]$Freq)
+  
+  # Calculate proportion of plate by condition
+  sitePerPlate[sitePerPlate$Site == site,]["Prop"] <- sitePerPlate[sitePerPlate$Site == site,]$Freq / 
+                                                              sum(sitePerPlate[sitePerPlate$Site == site,]$Freq)
+  
+}
+  
+for (plate in unique(platePerCondition$PLATE)) { 
+
+  # Calculate proportion of condition samples in plate
+  platePerCondition[platePerCondition$PLATE == plate,]["Prop"] <- platePerCondition[platePerCondition$PLATE == plate,]$Freq / 
+                                                                  sum(platePerCondition[platePerCondition$PLATE == plate,]$Freq)
+  
+}
+
+# Plot proportion of samples in each condition wrt site data
+SiteCond_plt <- ggplot(sitePerCondition, aes(x=Site, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity",
+           color="black") + 
+  scale_fill_manual(values=condCols) +
+  xlab("Site") + ylab("Proportion of Site Samples") +
+  theme_classic() +
+  theme(legend.position="top",
+        legend.direction="horizontal")
+SitePlate_plt <- ggplot(sitePerPlate, aes(x=Site, y=Prop, fill=PLATE)) + 
+  geom_bar(stat="identity",
+           color="black") + 
+  scale_fill_manual(values=plateCols) +
+  xlab("Site") + ylab("Proportion of Site Samples") +
+  theme_classic() +
+  theme(legend.position="top",
+        legend.direction="horizontal")
+PlateCond_plt <- ggplot(platePerCondition, aes(x=PLATE, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity",
+           color="black") + 
+  scale_fill_manual(values=condCols) +
+  xlab("Plate") + ylab("Proportion of Site Samples") +
+  theme_classic() +
+  theme(legend.position="top",
+        legend.direction="horizontal")
+SiteCond_plt + SitePlate_plt + PlateCond_plt
+
+```
+
+##### validation data
+
+```{r, fig.width=14, fig.height=5}
+
+# Enumerate smaples per site per condition
+metaCrossSectional_child <- metaCrossSectional_discoData[metaCrossSectional_validData$Age_Group == "Child",]
+sitePerCondition <- data.frame(table(metaCrossSectional_validData[,c("Site","Condition")]))
+sitePerCondition["Prop"] <- NA
+platePerCondition <- data.frame(table(metaCrossSectional_validData[,c("PLATE","Condition")]))
+platePerCondition["Prop"] <- NA
+sitePerPlate <- data.frame(table(metaCrossSectional_validData[,c("Site","PLATE")]))
+sitePerPlate["Prop"] <- NA
+for (site in unique(sitePerCondition$Site)) { 
+  
+  # Calculate proportion of condition samples in site
+  sitePerCondition[sitePerCondition$Site == site,]["Prop"] <- sitePerCondition[sitePerCondition$Site == site,]$Freq / 
+                                                              sum(sitePerCondition[sitePerCondition$Site == site,]$Freq)
+  
+  # Calculate proportion of plate by condition
+  sitePerPlate[sitePerPlate$Site == site,]["Prop"] <- sitePerPlate[sitePerPlate$Site == site,]$Freq / 
+                                                              sum(sitePerPlate[sitePerPlate$Site == site,]$Freq)
+  
+}
+  
+for (plate in unique(platePerCondition$PLATE)) { 
+
+  # Calculate proportion of condition samples in plate
+  platePerCondition[platePerCondition$PLATE == plate,]["Prop"] <- platePerCondition[platePerCondition$PLATE == plate,]$Freq / 
+                                                                  sum(platePerCondition[platePerCondition$PLATE == plate,]$Freq)
+  
+}
+
+# Plot proportion of samples in each condition wrt site data
+SiteCond_plt <- ggplot(sitePerCondition, aes(x=Site, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity",
+           color="black") + 
+  scale_fill_manual(values=condCols) +
+  xlab("Site") + ylab("Proportion of Site Samples") +
+  theme_classic() + 
+  theme(legend.position="top",
+        legend.direction="horizontal")
+SitePlate_plt <- ggplot(sitePerPlate, aes(x=Site, y=Prop, fill=PLATE)) + 
+  geom_bar(stat="identity",
+           color="black") + 
+  scale_fill_manual(values=plateCols) +
+  xlab("Site") + ylab("Proportion of Site Samples") +
+  theme_classic() + 
+  theme(legend.position="top",
+        legend.direction="horizontal")
+PlateCond_plt <- ggplot(platePerCondition, aes(x=PLATE, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity",
+           color="black") + 
+  scale_fill_manual(values=condCols) +
+  xlab("Plate") + ylab("Proportion of Site Samples") +
+  theme_classic() + 
+  theme(legend.position="top",
+        legend.direction="horizontal")
+SiteCond_plt + SitePlate_plt + PlateCond_plt
+
+```
+
+### Add combined site/condition
+
+```{r}
+
+metaCrossSectional_discoData["CondSite"] <- paste(metaCrossSectional_discoData$Condition, metaCrossSectional_discoData$Site, sep="_")
+metaCrossSectional_discoData["Condition"] <- gsub("Infectious ","Inf",metaCrossSectional_discoData$Condition)
+metaCrossSectional_validData["CondSite"] <- paste(metaCrossSectional_validData$Condition, metaCrossSectional_validData$Site, sep="_")
+metaCrossSectional_validData["Condition"] <- gsub("Infectious ","Inf",metaCrossSectional_validData$Condition)
+
+```
+
+### Combine additional and cross sectional metadata
+
+```{r}
+
+# Subset metadata
+addMetaCross <- addMeta[which(addMeta$Preschool.sample.ID %in% metaCrossSectional_discoData$Sample_ID),]
+addMetaValid <- addMeta[which(addMeta$Preschool.sample.ID %in% metaCrossSectional_validData$Sample_ID),]
+addMetaCross <- merge(metaCrossSectional_discoData, addMetaCross, by.x="Sample_ID", by.y="Preschool.sample.ID")
+addMetaValid <- merge(metaCrossSectional_validData, addMetaValid, by.x="Sample_ID", by.y="Preschool.sample.ID")
+
+# Check
+if (!all(addMetaCross$Sex.x %in% addMetaCross$Sex.y)) { stop("Sex scrambled between cross-sectional and additional metadata") }
+if (!all(addMetaCross$Age.x %in% addMetaCross$Age.y)) { stop("Age scrambled between cross-sectional and additional metadata") }
+if (!all(addMetaCross$Condition.x %in% addMetaCross$Condition.y)) { stop("Condition scrambled between cross-sectional and additional metadata") }
+if (!all(addMetaCross$Ethnicity.x %in% addMetaCross$Ethnicity.y)) { stop("Ethnicity scrambled between cross-sectional and additional metadata") }
+if (!all(addMetaValid$Sex.x %in% addMetaValid$Sex.y)) { stop("Sex scrambled between cross-sectional and additional metadata") }
+if (!all(addMetaValid$Age.x %in% addMetaValid$Age.y)) { stop("Age scrambled between cross-sectional and additional metadata") }
+if (!all(addMetaValid$Condition.x %in% addMetaValid$Condition.y)) { stop("Condition scrambled between cross-sectional and additional metadata") }
+if (!all(addMetaValid$Ethnicity.x %in% addMetaValid$Ethnicity.y)) { stop("Ethnicity scrambled between cross-sectional and additional metadata") }
+
+# Remove duplicate columns
+addMetaCross <- addMetaCross[,!grepl("[.]y",colnames(addMetaCross))]
+addMetaValid <- addMetaValid[,!grepl("[.]y",colnames(addMetaValid))]
+colnames(addMetaCross)[grepl("[.]x",colnames(addMetaCross))] <- c("Sex","Age","Ethnicity","Condition")
+colnames(addMetaValid)[grepl("[.]x",colnames(addMetaValid))] <- c("Sex","Age","Ethnicity","Condition")
+
+```
+
+```{r}
+
+# match
+livDates <- livDates[which(livDates$Sample_ID %in% metaCrossSectional_discoData$Sample_ID),]
+livDates_valid <- livDates_valid[which(livDates_valid$Sample_ID %in% metaCrossSectional_validData$Sample_ID),]
+
+# Add liverpool dates
+rownames(metaCrossSectional_discoData) <- metaCrossSectional_discoData$Sample_ID
+rownames(metaCrossSectional_validData) <- metaCrossSectional_validData$Sample_ID
+metaCrossSectional_discoData["Date.of.sample"] <- NA
+metaCrossSectional_validData["Date.of.sample"] <- NA
+metaCrossSectional_discoData[livDates$Sample_ID,]["Date.of.sample"] <- livDates$Date.of.sample
+metaCrossSectional_validData[livDates_valid$Sample_ID,]["Date.of.sample"] <- livDates_valid$Date.of.sample
+
+# Drop mismtached columns
+addMetaCross <- addMetaCross[,!grepl("Diagnosis|Box|Tick",colnames(addMetaCross))]
+addMetaValid <- addMetaValid[,!grepl("Diagnosis|Box|Tick",colnames(addMetaValid))]
+
+# Add liverpool data
+addMetaCross <- rbind(addMetaCross[,colnames(metaCrossSectional_discoData)], 
+                      metaCrossSectional_discoData[metaCrossSectional_discoData$Site == "Liverpool",])
+addMetaValid <- rbind(addMetaValid[,colnames(metaCrossSectional_validData)], 
+                      metaCrossSectional_validData[metaCrossSectional_validData$Site == "Liverpool",])
+table(addMetaCross$Site)
+table(addMetaCross$Condition)
+table(addMetaValid$Site)
+table(addMetaValid$Condition)
+
+```
+
+### Binarise Condition
+
+```{r}
+
+# Add bimodal CNO vs other
+metaCrossSectional_discoData["BiModal"] <- ifelse(metaCrossSectional_discoData$Condition == "CNO", "CNO", "Other")
+metaCrossSectional_validData["BiModal"] <- ifelse(metaCrossSectional_validData$Condition == "CNO", "CNO", "Other")
+addMeta["BiModal"] <- ifelse(addMeta$Condition == "CNO", "CNO", "Other")
+addMetaCross["BiModal"] <- ifelse(addMetaCross$Condition == "CNO", "CNO", "Other")
+
+```
+
+### Save clean metadata
+
+```{r}
+
+# Save
+write.table(metaCrossSectional_discoData, here::here(metaDir, "preSchool_crossSectional_tallFormatClean.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(metaCrossSectional_validData, here::here(metaDir, "preSchool_validationData_tallFormatClean_validationData.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(addMeta, here::here(metaDir, "preSchool_additionalMetadata.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(addMetaCross, here::here(metaDir, "preSchool_additionalMetadata_commonToCrossSectional.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(addMetaValid, here::here(metaDir, "preSchool_additionalMetadata_commonToCrossSectional_validationData.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Save ID converted quantification table
+
+```{r}
+
+# Save non-QC samples with sample ID names
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "processed"))
+write.table(quantTable_crossSectional[,c("PG.ProteinGroups", metaCrossSectional_discoData$Sample_ID)],  
+            here::here(diaDir, "processed", "crossSectional_pivotTable_PGQuantity.sampleIDs_noSerumQCs.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(quantTable_validData[,c("PG.ProteinGroups", metaCrossSectional_validData$Sample_ID)],  
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "processed", 
+                       "validationData_pivotTable_PGQuantity.sampleIDs_noSerumQCs.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+
+
+
+
+
+

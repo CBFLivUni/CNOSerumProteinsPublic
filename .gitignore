@@ -1,0 +1,25 @@
+
+# Folders
+**/data/*
+**/meetings*/*
+**/results/*
+**/singularityCompile/*
+**/paper/*
+**omnipath*/*
+
+# Documents
+**/*.pptx
+**/*.docx
+**/cnoPaperFigures.pptx
+**/paperMethodsResults.docx
+
+# R data types
+**/*RData
+**/*Rdata
+**/*rdata
+**/*rds
+**/*Rds
+**/*RDS
+**/*Rproj.user/*
+**/*sif
+.Rproj.user

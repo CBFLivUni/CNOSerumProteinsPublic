@@ -1,0 +1,482 @@
+---
+title: "Exploratory Data Analysis"
+author: "Euan McDonnell"
+format: html
+editor: source
+---
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Install here
+if (!require("here")) { install.packages("here") }
+
+# Source metadata
+here::i_am("04_eda.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Load data
+
+```{r}
+
+# Load metadatas
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata_filtered.R"))
+
+# Abundance tables
+source(here::here("utilities", "R", "codeModules", "data", "unFiltered_quantTables.R"))
+
+# Read in chosen normalised data
+normQuantTable_cross <- read.table(here::here(diaDir, "normalised", "crossSectional_quantTable_normalisedCyclicLoess.tsv"),
+                             sep="\t", header=TRUE, row.names=1)
+
+# Drop QC samples
+normQuantTable_cross <- normQuantTable_cross[,!grepl("QC", colnames(normQuantTable_cross))]
+dim(normQuantTable_cross)
+
+```
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Save as RDS
+plotList <- readRDS(here::here(figDir, 
+                    "03_dataNormalisation_figs.rds"))
+ 
+```
+
+## Main code
+
+### PCA
+
+Do this for proteins with no missing values and compare to probabilistic PCA.
+
+#### Prep
+
+```{r}
+
+# Edit Colours
+tidyCondCols <- condCols
+names(tidyCondCols) <- gsub("Infectious.","Inf. ",names(tidyCondCols))
+
+# Make column categorical
+metaCrossSectional$COLUMN <- as.character(metaCrossSectional$COLUMN)
+
+# Fix infectious osteomyelitis
+metaCrossSectional$Condition <- gsub("Infectious ","Inf. ",metaCrossSectional$Condition)
+
+```
+
+#### All Samples
+
+```{r}
+
+# Run PCA
+crossPCA <- prcomp(t(normQuantTable_cross[!is.na(rowSums(normQuantTable_cross)),]), center=TRUE, scale=TRUE)
+
+# Merge with metadata
+crossPCA_metaData <- merge(metaCrossSectional[,!grepl("^PC",colnames(metaCrossSectional))], crossPCA$x, by.x="Sample_ID", by.y="row.names")
+
+```
+
+#### Child Samples
+
+```{r}
+
+# Run PCA
+crossChildPCA <- prcomp(t(normQuantTable_cross[!is.na(rowSums(normQuantTable_cross)), metaCrossSectional[metaCrossSectional$Age_Group == "Child",]$Sample_ID]), center=TRUE, scale=TRUE)
+
+# Merge with metadata
+crossChildPCA_metaData <- merge(metaCrossSectional[,!grepl("^PC",colnames(metaCrossSectional))], crossChildPCA$x, by.x="Sample_ID", by.y="row.names")
+
+```
+
+#### Plot all
+
+```{r}
+
+# Keep the code in a sourced R script for tidyness
+source(here::here("utilities", "R", "codeModules", "plotting", "plotPCA_crossSectional.R"))
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=12) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(shape="Age Group") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+plate1_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(1, 2), pch_size=12) + 
+    scale_fill_manual(values=plateCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+plate2_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(2, 3), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+plate3_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(3, 4), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+plate4_plt <- Plot2DPCA(meta=crossChildPCA_metaData, var=get_eigenvalue(crossChildPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(4, 5), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt,
+                plate1_plt,
+                plate2_plt,
+                plate3_plt,
+                plate4_plt)
+names(newList) <- c("normAbundancePCA_colBySite",
+                    "normAbundancePCA_colByCondition",
+                    "normAbundancePCA_colByPlatePC12",
+                    "normAbundancePCA_colByPlatePC23",
+                    "normAbundancePCA_colByPlatePC34",
+                    "normAbundancePCA_colByPlatePC45")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Probabilistic PCA
+
+Base off of: https://www.bioconductor.org/packages/release/bioc/vignettes/pcaMethods/inst/doc/pcaMethods.pdf
+
+quantTable_crossSectional \<- data.frame(PG.ProteinAccessions=rownames(quantTable_crossSectional), quantTable_crossSectional\[,c(crossPropSmpls\[crossPropSmpls$PROP_MISSING < maxPropMissing,]$ID)\]) quantTable_longitudinal \<- data.frame(PG.ProteinAccessions=rownames(quantTable_longitudinal), quantTable_longitudinal\[,c(longPropSmpls\[longPropSmpls$PROP_MISSING < maxPropMissing,]$ID)\])
+
+#### Cross-Sectional
+
+##### All-together
+
+```{r}
+
+# Fit probabilistic PCA
+set.seed(35353)
+resPPCA <- pcaMethods::pca(t(normQuantTable_cross[,metaCrossSectional$Sample_ID]), 
+                           method="ppca", center=TRUE, scale="pareto", cv="q2", nPcs=10)
+
+# Combine with metadata
+resPPCA_data <- merge(metaCrossSectional, pcaMethods::scores(resPPCA), by.x="Sample_ID", "row.names")
+
+# Get variance explained
+varExpl <- list(variance.percent=(sDev(resPPCA) / sum(sDev(resPPCA)))  * 100)
+
+```
+
+##### Child-only
+
+```{r}
+
+# Fit probabilistic PCA
+set.seed(35353)
+resPPCA_child <- pcaMethods::pca(t(normQuantTable_cross[,metaCrossSectional[metaCrossSectional$Age_Group == "Child",]$Sample_ID]), 
+                                 method="ppca", center=TRUE, scale="pareto", cv="q2", nPcs=10)
+
+# Combine with metadata
+resPPCA_childData <- merge(metaCrossSectional, scores(resPPCA_child), by.x="Sample_ID", "row.names")
+
+# Get variance explained
+varExpl_child <- list(variance.percent=(sDev(resPPCA_child) / sum(sDev(resPPCA_child)))  * 100)
+
+# Set factors as categorical/numeric
+resPPCA_childData$COLUMN <- as.character(resPPCA_childData$COLUMN)
+
+```
+
+##### Adult-only
+
+```{r}
+
+# If adult
+if (!excludeAdultSamples) {
+  
+  # Fit probabilistic PCA
+  set.seed(35353)
+  resPPCA_adult <- pcaMethods::pca(t(normQuantTable_cross[,metaCrossSectional[metaCrossSectional$Age_Group == "Adult",]$Sample_ID]), 
+                                   method="ppca", center=TRUE, scale="pareto", cv="q2", nPcs=10)
+  
+  # Combine with metadata
+  resPPCA_adultData <- merge(metaCrossSectional, scores(resPPCA_adult), by.x="Sample_ID", "row.names")
+  
+  # Get variance explained
+  varExpl_adult <- list(variance.percent=(sDev(resPPCA_adult) / sum(sDev(resPPCA_adult)))  * 100)
+  
+  # Set factors as categorical/numeric
+  resPPCA_adultData$COLUMN <- as.character(resPPCA_adultData$COLUMN)
+
+}  
+
+```
+
+##### Plot
+
+```{r}
+
+# Keep the code in a sourced R script for tidyness
+source(here::here("utilities", "R", "codeModules", "plotting", "plotProbPCA_crossSectional.R"))
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=9) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=9) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+plate_plt <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="PLATE", label_id="Sample_ID", pcs=c(1, 2), pch_size=12) + 
+    scale_fill_manual(values=plateCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+condSite_plt1 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="CondSite", label_id="Sample_ID", pcs=c(1, 2), pch_size=9) + 
+    scale_fill_manual(values=condSiteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+condSite_plt2 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="CondSite", label_id="Sample_ID", pcs=c(2, 3), pch_size=9) + 
+    scale_fill_manual(values=condSiteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+condSite_plt3 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="CondSite", label_id="Sample_ID", pcs=c(3, 4), pch_size=9) + 
+    scale_fill_manual(values=condSiteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+condSite_plt4 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="CondSite", label_id="Sample_ID", pcs=c(4, 5), pch_size=9) + 
+    scale_fill_manual(values=condSiteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+condSite_plt5 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="CondSite", label_id="Sample_ID", pcs=c(5, 6), pch_size=9) + 
+    scale_fill_manual(values=condSiteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+condSite_plt6 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="CondSite", label_id="Sample_ID", pcs=c(6, 7), pch_size=9) + 
+    scale_fill_manual(values=condSiteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+site_plt1 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=9) + 
+    scale_fill_manual(values=siteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+site_plt2 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="Site", label_id="Sample_ID", pcs=c(2, 3), pch_size=9) + 
+    scale_fill_manual(values=siteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+site_plt3 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="Site", label_id="Sample_ID", pcs=c(3, 4), pch_size=9) + 
+    scale_fill_manual(values=siteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+site_plt4 <- Plot2DPCA(meta=resPPCA_childData, var=varExpl_child, color_by="Site", label_id="Sample_ID", pcs=c(4, 5), pch_size=9) + 
+    scale_fill_manual(values=siteCols) +
+    theme_minimal(base_size=48) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=64),
+          legend.text=element_text(size=56),
+          axis.title=element_text(size=64),
+          plot.title=element_text(size=72)) +
+    labs(fill="Plate") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt,
+                plate_plt,
+                condSite_plt1,
+                condSite_plt2,
+                condSite_plt3,
+                condSite_plt4,
+                condSite_plt5,
+                condSite_plt6,
+                site_plt1,
+                site_plt2,
+                site_plt3,
+                site_plt4)
+names(newList) <- c("normAbundancePPCA_colBySite",
+                    "normAbundancePPCA_colByCondition",
+                    "normAbundancePPCA_colByPlate",
+                    "normAbundancePPCA_colByCondSitePC12",
+                    "normAbundancePPCA_colByCondSitePC23",
+                    "normAbundancePPCA_colByCondSitePC34",
+                    "normAbundancePPCA_colByCondSitePC45",
+                    "normAbundancePPCA_colByCondSitePC67",
+                    "normAbundancePPCA_colByCondSitePC78",
+                    "normAbundancePPCA_colBySitePC12",
+                    "normAbundancePPCA_colBySitePC23",
+                    "normAbundancePPCA_colBySitePC34",
+                    "normAbundancePPCA_colBySitePC45")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "04_eda_figs.rds"))
+
+```
+
+
+
+

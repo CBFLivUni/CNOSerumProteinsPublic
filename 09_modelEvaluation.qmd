@@ -1,0 +1,956 @@
+---
+title: "Model Evalutaion"
+format: html
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Ensure correction location
+if (!require(here)) { install.packages("here") }
+here::i_am("09_modelEvaluation.qmd")
+
+# Source parameters, functions and install packages
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+# Source grid search parameters
+source(here::here("params", "biomarkerParams_gridSearch.R"))
+
+```
+
+### Load data
+
+#### Abundance data
+
+```{r}
+
+# Read in cyclic Loess-normalised data
+quantTable_allSamples <- read.table(here::here(diaDir, "normalised", 
+                                    "metaCrossSectional_NormalyzerDE_byCondition", "CycLoess-normalized.txt"), sep="\t", header=TRUE, row.names=1)
+# Match metadata
+trainMetaData <- read.table(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "biomarkers",
+                                       "allSamplesMetadata_takenForSelection.tsv"), sep="\t", header=TRUE)
+
+# Chosen imputed data
+quantTable_chosenMethod <- read.table(here::here(impDir, paste0("quantTable_imputedWithbPCA.tsv")), sep="\t", header=TRUE, row.names=1)
+quantTable_chosenMethodScaled <- t(apply(quantTable_chosenMethod[,-1], 1, function(row) scale(row, center=TRUE, scale=TRUE)))
+colnames(quantTable_chosenMethodScaled) <- colnames(quantTable_chosenMethod)[-1]
+
+# Get common
+quantTable <- quantTable_allSamples[,trainMetaData$Sample_ID]
+
+# Keep only selected metadata
+quantTable <- quantTable[,!grepl("QC",colnames(quantTable))]
+quantTable_noMissing <- quantTable[!is.na(rowSums(quantTable)),]
+
+# raed in differential abundance data
+diffData <- read.table(here::here(resCrossDiscoDir, "trainSplitProp0.8", "sampleRandom", "differentialAbundance",
+                                  "limmaResults_ANOVA_wrtCNOvContrasts_crossSectionalData_justDresdenSamples.tsv"),
+                       sep="\t",
+                       header=TRUE)
+
+# Read in nomrlaised, unimputed data
+quantTableNorm <- read.table(here::here(diaDir, "normalised", 
+                                        "crossSectional_quantTable_normalisedCyclicLoess.tsv"),
+                             sep="\t",
+                             header=TRUE,
+                             row.names=1)
+
+# Take sig
+diffDataSig <- diffData[diffData$adj.P.Val < candidatePThr,]
+
+```
+
+#### Metadata
+
+```{r}
+
+# Metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata_filtered.R"))
+
+# Get relevant samples
+metaCrossSectional_child <- metaCrossSectional[metaCrossSectional$Age_Group == "Child",]
+metaCrossSectional_noJIA <- metaCrossSectional_child[!metaCrossSectional_child$Condition %in% c("JIA"),]
+
+# Get test data
+testMetaData <- metaCrossSectional_noJIA[!metaCrossSectional_noJIA$Sample_ID %in% trainMetaData$Sample_ID,]
+
+# Add years
+addMetaCross_child["Years"] <- ( max(as.numeric(ymd(addMetaCross_child$Date.of.sample)), na.rm=TRUE) - as.numeric(ymd(addMetaCross_child$Date.of.sample)) ) / 365 
+
+```
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+## Main
+
+### List all relevant models
+
+```{r}
+
+# Get possible files
+grpModelFiles <- list.files(pattern = "mg_lassoRFModel.rds", 
+                            recursive = TRUE)
+bimModelFiles <- list.files(pattern = "bm_lassoRFModel.rds", 
+                            recursive = TRUE)
+
+# Keep run name
+grpModelFiles <- grpModelFiles[grepl(runName,grpModelFiles)]
+bimModelFiles <- bimModelFiles[grepl(runName,bimModelFiles)]
+grpModelFiles <- grpModelFiles[!grepl("old",grpModelFiles)]
+bimModelFiles <- bimModelFiles[!grepl("old",bimModelFiles)]
+
+grpModelFiles <- grpModelFiles[grepl("lfc0.1|lfc0.2|lfc0.3|lfc0.4|lfc0.5", grpModelFiles)]
+bimModelFiles <- bimModelFiles[grepl("lfc0.1|lfc0.2|lfc0.3|lfc0.4|lfc0.5", bimModelFiles)]
+
+grpModelFiles <- grpModelFiles[grepl("DresdenOnly", grpModelFiles)]
+bimModelFiles <- bimModelFiles[grepl("DresdenOnly", bimModelFiles)]
+
+length(grpModelFiles)
+length(bimModelFiles)
+
+```
+
+### Load models
+
+```{r}
+
+# Loop over models 
+grpModels <- list()
+bimModels <- list()
+for (modelFilename in grpModelFiles) {
+  
+  # Append models
+  grpModels <- rlist::list.append(grpModels, readRDS(here::here(modelFilename)))
+  
+}
+for (modelFilename in bimModelFiles) {
+  
+  # Append models
+  bimModels <- rlist::list.append(bimModels, readRDS(here::here(modelFilename)))
+  
+}
+
+gc()
+
+
+```
+
+### Add names
+
+```{r}
+
+# Get parameters
+grpModelAttrib <- lapply(grpModels, function(mod) mod[[1]]$Parameterisation)
+bimModelAttrib <- lapply(bimModels, function(mod) mod[[1]]$Parameterisation)
+
+# Add names to models
+names(grpModels) <- sapply(grpModelAttrib, paste, collapse="_")
+names(bimModels) <- sapply(bimModelAttrib, paste, collapse="_")
+
+```
+
+### Get numbers of proteins
+
+```{r}
+
+multiGrp_modelProts <- data.frame()
+biModal_modelProts <- data.frame()
+
+# Loop over models
+for (i in seq_len(length(grpModels))) {
+  
+  # Get model details
+  grpModelProts <- data.frame(ModelID=names(grpModels[i]),
+                              SelectedProteins=grpModels[[i]][[1]]$varSel)
+  bimModelProts <- data.frame(ModelID=names(bimModels[i]),
+                              SelectedProteins=bimModels[[i]][[1]]$varSel)
+  
+  # Combine to output
+  multiGrp_modelProts <- rbind(multiGrp_modelProts,
+                               grpModelProts)
+  biModal_modelProts  <- rbind(biModal_modelProts,
+                               bimModelProts)
+  
+}
+
+# Get parameters
+multiGrp_modelProts <- cbind(multiGrp_modelProts, stringr::str_split_fixed(multiGrp_modelProts$ModelID, pattern="_", n=Inf))
+biModal_modelProts  <- cbind(biModal_modelProts,  stringr::str_split_fixed(biModal_modelProts$ModelID, pattern="_", n=Inf))
+colnames(multiGrp_modelProts) <- c("ModelID","SelectedProteins","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                   "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+colnames(biModal_modelProts)  <- c("ModelID","SelectedProteins","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                   "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+
+# FreqProts
+multiGrp_protFreq <- aggregate(SelectedProteins ~ ModelID, data=multiGrp_modelProts[,1:2], FUN=length)
+biModal_protFreq  <- aggregate(SelectedProteins ~ ModelID,  data=biModal_modelProts[,1:2], FUN=length)
+
+# Get parameters
+multiGrp_protFreq <- cbind(multiGrp_protFreq, stringr::str_split_fixed(multiGrp_protFreq$ModelID, pattern="_", n=Inf))
+biModal_protFreq  <- cbind(biModal_protFreq,  stringr::str_split_fixed(biModal_protFreq$ModelID, pattern="_", n=Inf))
+colnames(multiGrp_protFreq) <- c("ModelID","Frequency","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                   "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+colnames(biModal_protFreq)  <- c("ModelID","Frequency","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                   "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+
+```
+
+### Extract model MCCs
+
+```{r}
+
+# Define outputs
+multiGrp_modelMCC <- data.frame()
+multiGrp_allModelMCC <- data.frame()
+biModal_modelMCC  <- data.frame()
+biModal_allModelMCC <- data.frame()
+
+# Loop over models
+for (i in seq_len(length(grpModels))) {
+  
+  # Get MCC
+  mccsGrp <- sapply(seq_len(length(grpModels[[i]])), function(j) grpModels[[i]][[j]]$rfMCC)
+  mccsBim <- sapply(seq_len(length(bimModels[[i]])), function(j) bimModels[[i]][[j]]$rfMCC)
+  
+  # Get coefficient of variation
+  mccGrpCoefVar <- sd(mccsGrp, na.rm=TRUE) / mean(mccsGrp, na.rm=TRUE)
+  mccBimCoefVar <- sd(mccsBim, na.rm=TRUE) / mean(mccsBim, na.rm=TRUE)
+  
+  # Get model details
+  grpModelMCC <- data.frame(ModelID=names(grpModels[i]),
+                            ModelFeatures=grpModels[[i]][[1]]$Parameterisation,
+                            Mean=mean(mccsGrp, na.rm=TRUE),
+                            SD=sd(mccsGrp, na.rm=TRUE),
+                            CoeffVar=mccGrpCoefVar)
+  bimModelMCC <- data.frame(ModelID=names(bimModels[i]),
+                            ModelFeatures=bimModels[[i]][[1]]$Parameterisation,
+                            Mean=mean(mccsBim, na.rm=TRUE),
+                            SD=sd(mccsBim, na.rm=TRUE),
+                            CoeffVar=mccBimCoefVar)
+  
+  # Combine to output
+  multiGrp_modelMCC <- rbind(multiGrp_modelMCC,
+                             grpModelMCC)
+  biModal_modelMCC <- rbind(biModal_modelMCC,
+                             bimModelMCC)
+  multiGrp_allModelMCC <- rbind(multiGrp_allModelMCC,
+                                data.frame(ModelID=names(grpModels[i]), 
+                                           Split=seq_len(length(mccsGrp)),
+                                           MCC=mccsGrp))
+  biModal_allModelMCC <- rbind(biModal_allModelMCC,
+                                data.frame(ModelID=names(bimModels[i]), 
+                                           Split=seq_len(length(mccsBim)),
+                                           MCC=mccsBim))
+  
+}
+
+### Get model params for MCC
+multiGrp_allModelMCC <- cbind(multiGrp_allModelMCC, stringr::str_split_fixed(multiGrp_allModelMCC$ModelID, pattern="_", n=Inf))
+biModal_allModelMCC <- cbind(biModal_allModelMCC, stringr::str_split_fixed(biModal_allModelMCC$ModelID, pattern="_", n=Inf))
+colnames(multiGrp_allModelMCC) <- c("ModelID","Split","MCC","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                    "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+colnames(biModal_allModelMCC) <- c("ModelID","Split","MCC","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                    "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+
+# Sort factor levels
+multiGrp_allModelMCC$Log2Thr <- factor(multiGrp_allModelMCC$Log2Thr, levels=c("0","0.1","0.2","0.3","0.4","0.5"))
+multiGrp_allModelMCC$PThr <- factor(multiGrp_allModelMCC$PThr, levels=c("0.1","0.05","0.01"))
+biModal_allModelMCC$Log2Thr <- factor(biModal_allModelMCC$Log2Thr, levels=c("0","0.1","0.2","0.3","0.4","0.5"))
+biModal_allModelMCC$PThr <- factor(multiGrp_allModelMCC$PThr, levels=c("0.1","0.05","0.01"))
+
+```
+
+### Check MCC and Group Frequency correlation
+
+```{r}
+
+multiGrpTrain_corRes <- data.frame()
+multiGrpTest_corRes  <- data.frame()
+bimTrain_corRes <- data.frame()
+bimTest_corRes  <- data.frame()
+
+# Define all conitions
+allConditions <- unique(metaCrossSectional_child$Condition)
+
+getCondFreq <- function(model,
+                        conds,
+                        dataSet,
+                        bimodalModel=FALSE) {
+  
+    # Get list of frequencies
+    out <- lapply(seq_len(length(model)), function(j) {
+      
+      # If running a bimodal model, group non-CNO conditions
+      if (bimodalModel) {
+        
+        freq <- table(ifelse(model[[j]]$SampleConditions[[dataSet]] == conds[[1]], conds[[1]], conds[[2]]))
+
+      # Else consider individual 
+      } else {
+      
+        # Enumerate frequencies
+        freq <- unlist(table(model[[j]]$SampleConditions[[dataSet]]))
+        
+      }
+      
+      # return
+      return(freq[conds])
+      
+    })
+    
+    # Return
+    return(out)
+    
+}
+
+# Loop over models
+for (i in seq_len(length(grpModels))) {
+  
+  # Get MCCs
+  mccsGrp <- sapply(seq_len(length(grpModels[[i]])), function(j) grpModels[[i]][[j]]$rfMCC)
+  mccsBim <- sapply(seq_len(length(bimModels[[i]])), function(j) bimModels[[i]][[j]]$rfMCC)
+  
+  # Get condiiton frequency
+  grpFrq_grpTrain <- do.call("rbind", getCondFreq(model=grpModels[[i]], conds=allConditions, dataSet="Train"))
+  grpFrq_grpTest  <- do.call("rbind", getCondFreq(model=grpModels[[i]], conds=allConditions, dataSet="Test"))
+  grpFrq_bimTrain <- do.call("rbind", getCondFreq(model=bimModels[[i]], conds=c("CNO", "Other"), dataSet="Train", bimodalMode=TRUE))
+  grpFrq_bimTest  <- do.call("rbind", getCondFreq(model=bimModels[[i]], conds=c("CNO", "Other"), dataSet="Train", bimodalModel=TRUE))
+  
+  # Correlate
+  corRes_grpTrain <- cor(scale(mccsGrp, center=TRUE, scale=TRUE), apply(grpFrq_grpTrain, 2, scale, center=TRUE, scale=TRUE))
+  corRes_grpTest <- cor(scale(mccsGrp, center=TRUE, scale=TRUE), apply(grpFrq_grpTest, 2, scale, center=TRUE, scale=TRUE))
+  
+  corRes_bimTrain <- cor(scale(mccsBim, center=TRUE, scale=TRUE), apply(grpFrq_bimTrain, 2, scale, center=TRUE, scale=TRUE))
+  corRes_bimTest <- cor(scale(mccsBim, center=TRUE, scale=TRUE), apply(grpFrq_bimTest, 2, scale, center=TRUE, scale=TRUE))
+  
+  # Melt
+  corRes_grpTrainTall <- reshape2::melt(cbind(Group=rownames(grpFrq_grpTrain), grpFrq_grpTrain), id.vars="Group")
+  corRes_grpTestTall <- reshape2::melt(cbind(Group=rownames(grpFrq_grpTest), grpFrq_grpTest), id.vars="Group")
+
+  # Generate output
+  multiGrpTrain_corRes <- rbind(multiGrpTrain_corRes,
+                                data.frame(ModelID=names(grpModels[i]), 
+                                           data.frame(t(corRes_grpTrain))))
+  multiGrpTest_corRes  <- rbind(multiGrpTest_corRes,
+                                data.frame(ModelID=names(grpModels[i]), 
+                                           data.frame(t(corRes_grpTest))))
+  bimTrain_corRes <- rbind(bimTrain_corRes,
+                                data.frame(ModelID=names(bimModels[i]), 
+                                           data.frame(t(corRes_bimTrain))))
+  bimTest_corRes  <- rbind(bimTest_corRes,
+                                data.frame(ModelID=names(bimModels[i]), 
+                                           data.frame(t(corRes_bimTest))))
+  
+}
+
+### Add group
+multiGrpTrain_corRes <- cbind(multiGrpTrain_corRes, "Group"=gsub("[0-9]*$","",rownames(multiGrpTrain_corRes)))
+bimTrain_corRes <- cbind(bimTrain_corRes, "Group"=gsub("[0-9]*$","",rownames(bimTrain_corRes)))
+
+### Get model params for MCC
+multiGrpTrain_corRes <- cbind(multiGrpTrain_corRes, stringr::str_split_fixed(multiGrpTrain_corRes$ModelID, pattern="_", n=Inf))
+bimTrain_corRes <- cbind(bimTrain_corRes, stringr::str_split_fixed(bimTrain_corRes$ModelID, pattern="_", n=Inf))
+colnames(multiGrpTrain_corRes) <- c("ModelID","Correlation","Group","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                    "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+colnames(bimTrain_corRes) <- c("ModelID","Correlation","Group","ImputationMethod","BatchAdjusted","FeatureTypesSelected","CommonProteins",
+                                    "SigFilter","FreqRuns","FreqSplit","PThr","Log2Thr","DEMethod","ProtSet")
+
+# Sort factor levels
+multiGrpTrain_corRes$Log2Thr <- factor(multiGrpTrain_corRes$Log2Thr, levels=c("0","0.1","0.2","0.5"))
+multiGrpTrain_corRes$PThr <- factor(multiGrpTrain_corRes$PThr, levels=c("0.1","0.05","0.01"))
+bimTrain_corRes$Log2Thr <- factor(bimTrain_corRes$Log2Thr, levels=c("0","0.1","0.2","0.5"))
+bimTrain_corRes$PThr <- factor(bimTrain_corRes$PThr, levels=c("0.1","0.05","0.01"))
+
+```
+
+### Plot correlation of MCC vs group frequencies
+
+```{r}
+
+# Get groups to loop over
+groups <- unique(multiGrpTrain_corRes$Group)
+
+```
+
+### Get overlap matrix
+
+```{r}
+
+# Get proteins
+selectProts_grpModel <- lapply(seq_len(length(grpModels)), function(i) grpModels[[i]][[1]]$varSel)
+selectProts_bimModel <- lapply(seq_len(length(bimModels)), function(i) bimModels[[i]][[1]]$varSel)
+
+# Function to compute the number of common elements
+jsiCommonProts <- function(x, y) {
+  length(intersect(x, y)) / length(union(x, y))
+}
+intersectCommonProts <- function(x, y) { length(intersect(x, y)) }
+    
+# Generate the symmetrical matrix using outer and sapply
+jsiProtM_grp <- outer(selectProts_grpModel, selectProts_grpModel, Vectorize(jsiCommonProts))
+jsiProtM_bim <- outer(selectProts_bimModel, selectProts_bimModel, Vectorize(jsiCommonProts))
+rownames(jsiProtM_grp) <- names(grpModels)
+colnames(jsiProtM_grp) <- names(grpModels)
+rownames(jsiProtM_bim) <- names(bimModels)
+colnames(jsiProtM_bim) <- names(bimModels)
+
+```
+
+### Get intersections
+
+```{r}
+
+# Generate the symmetrical matrix using outer and sapply
+intProtM_grp <- outer(selectProts_grpModel, selectProts_grpModel, Vectorize(intersectCommonProts))
+intProtM_bim <- outer(selectProts_bimModel, selectProts_bimModel, Vectorize(intersectCommonProts))
+rownames(intProtM_grp) <- names(grpModels)
+colnames(intProtM_grp) <- names(grpModels)
+rownames(intProtM_bim) <- names(bimModels)
+colnames(intProtM_bim) <- names(bimModels)
+
+```
+
+### Plot heatmap
+
+```{r}
+    
+# Color function
+cellColFun <- colorRamp2(c(0, 1), c('white','deepskyblue'))
+
+dir.create(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp),"sampleRandom", "biomarkers", "modelComparison", "overlapProts", "jsi", "biModal"),
+           recursive=TRUE)
+dir.create(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp),"sampleRandom", "biomarkers", "modelComparison", "overlapProts", "jsi", "multiGroup"),
+           recursive=TRUE)
+
+bimModel_metaData <- biModal_modelProts[!duplicated(biModal_modelProts$ModelID),]
+grpModel_metaData <- biModal_modelProts[!duplicated(biModal_modelProts$ModelID),]
+
+```
+
+### Investigate frequent proteins
+
+```{r}
+
+pThr <- "0.05"
+
+# Relevant columns
+relCols <- c("ModelID","SelectedProteins","ImputationMethod","PThr","Log2Thr")
+
+# FreqProts
+multiGrp_protFreq <- aggregate(ModelID ~ SelectedProteins + ImputationMethod + Log2Thr + PThr,
+                               data=multiGrp_modelProts[, relCols], FUN=length)
+biModal_protFreq  <- aggregate(ModelID ~ SelectedProteins + ImputationMethod + Log2Thr + PThr, 
+                               data=biModal_modelProts[, relCols], FUN=length)
+
+# Order
+multiGrp_protFreq <- multiGrp_protFreq[order(multiGrp_protFreq$ModelID, decreasing=TRUE),]
+biModal_protFreq <- biModal_protFreq[order(biModal_protFreq$ModelID, decreasing=TRUE),]
+
+# Set if proteins have missing values
+biModal_protFreq["Imputed"] <- "Yes"
+biModal_protFreq[which(biModal_protFreq$SelectedProteins %in% rownames(quantTable_noMissing)),]["Imputed"] <- "No"
+multiGrp_protFreq["Imputed"] <- "Yes"
+multiGrp_protFreq[which(multiGrp_protFreq$SelectedProteins %in% rownames(quantTable_noMissing)),]["Imputed"] <- "No"
+
+```
+
+```{r}
+
+# Generate all possible combinations of factor2, factor3, and factor1
+bim_allCombinations <- expand.grid(
+  Imputed = unique(biModal_protFreq$Imputed),
+  Log2Thr = unique(biModal_protFreq$Log2Thr),
+  PThr = unique(biModal_protFreq$PThr),
+  SelectedProteins = unique(biModal_protFreq$SelectedProteins),
+  ImputationMethod = unique(biModal_protFreq$ImputationMethod)
+)
+grp_allCombinations <- expand.grid(
+  Imputed = unique(multiGrp_protFreq$Imputed),
+  Log2Thr = unique(multiGrp_protFreq$Log2Thr),
+  PThr = unique(multiGrp_protFreq$PThr),
+  SelectedProteins = unique(multiGrp_protFreq$SelectedProteins),
+  ImputationMethod = unique(multiGrp_protFreq$ImputationMethod)
+)
+
+# Merge original data with all combinations, filling missing values with 0
+biModal_protFreqFull <- merge(bim_allCombinations, biModal_protFreq, by = c("Imputed", "Log2Thr", "PThr", "SelectedProteins", "ImputationMethod"), all.x = TRUE)
+multiGrp_protFreqFull <- merge(grp_allCombinations, multiGrp_protFreq, by = c("Imputed", "Log2Thr", "PThr", "SelectedProteins", "ImputationMethod"), all.x = TRUE)
+biModal_protFreqFull$ModelID[is.na(biModal_protFreqFull$ModelID)] <- 0
+multiGrp_protFreqFull$ModelID[is.na(multiGrp_protFreqFull$ModelID)] <- 0
+
+# Make heatmap
+bim_mat2Plot <- reshape(
+  
+  biModal_protFreqFull,
+  timevar = "ImputationMethod", # Becomes columns
+  idvar = c("Imputed","Log2Thr","PThr","SelectedProteins"), # Becomes rows
+  direction = "wide" # Specify wide
+  
+)
+grp_mat2Plot <- reshape(
+  
+  multiGrp_protFreqFull,
+  timevar = "ImputationMethod", # Becomes columns
+  idvar = c("Imputed","Log2Thr","PThr","SelectedProteins"), # Becomes rows
+  direction = "wide" # Specify wide
+  
+)
+colnames(bim_mat2Plot) <- gsub("ModelID[.]","",colnames(bim_mat2Plot))
+colnames(grp_mat2Plot) <- gsub("ModelID[.]","",colnames(grp_mat2Plot))
+
+```
+
+```{r}
+
+# Get all unique selected prorteins
+bim_allProts <- unique(biModal_modelProts$SelectedProteins)
+grp_allProts <- unique(multiGrp_modelProts$SelectedProteins)
+
+# Split by pvalue threshold
+bim_mat2Plot$PThr <- as.character(bim_mat2Plot$PThr)
+grp_mat2Plot$PThr <- as.character(grp_mat2Plot$PThr)
+bim_mat2PlotWide <- do.call("cbind", lapply(unique(bim_mat2Plot$PThr), function(pThr) {
+  
+  bim_mat2Plot[bim_mat2Plot$PThr == pThr, imputationMethod]
+  
+}))
+grp_mat2PlotWide <- do.call("cbind", lapply(unique(grp_mat2Plot$PThr), function(pThr) {
+  
+  grp_mat2Plot[grp_mat2Plot$PThr == pThr, imputationMethod]
+  
+}))
+
+# Add relevant metadata
+bim_rowMetadata <- bim_mat2Plot[!duplicated(bim_mat2Plot[,c("Imputed", "Log2Thr","SelectedProteins")]),c("Imputed", "Log2Thr","SelectedProteins")]
+grp_rowMetadata <- grp_mat2Plot[!duplicated(grp_mat2Plot[,c("Imputed", "Log2Thr","SelectedProteins")]),c("Imputed", "Log2Thr","SelectedProteins")]
+
+# Add rownames
+rownames(bim_rowMetadata) <- paste(bim_rowMetadata$Imputed, bim_rowMetadata$Log2Thr, bim_rowMetadata$SelectedProteins, sep="_")
+rownames(grp_rowMetadata) <- paste(grp_rowMetadata$Imputed, grp_rowMetadata$Log2Thr, grp_rowMetadata$SelectedProteins, sep="_")
+rownames(bim_mat2PlotWide) <- rownames(bim_rowMetadata)
+rownames(grp_mat2PlotWide) <- rownames(grp_rowMetadata)
+
+# Fix imputed
+bim_rowMetadata["Imputed"] <- "Yes"
+grp_rowMetadata["Imputed"] <- "Yes"
+bim_rowMetadata[which(bim_rowMetadata$SelectedProteins %in% rownames(quantTable_noMissing)),]["Imputed"] <- "No"
+grp_rowMetadata[which(grp_rowMetadata$SelectedProteins %in% rownames(quantTable_noMissing)),]["Imputed"] <- "No"
+
+# De-duplicate
+bim_rowMetadata <- bim_rowMetadata[!duplicated(bim_rowMetadata),]
+grp_rowMetadata <- grp_rowMetadata[!duplicated(grp_rowMetadata),]
+
+# Add rownames
+rownames(bim_rowMetadata) <- paste(bim_rowMetadata$Imputed, bim_rowMetadata$Log2Thr, bim_rowMetadata$SelectedProteins, sep="_")
+rownames(grp_rowMetadata) <- paste(grp_rowMetadata$Imputed, grp_rowMetadata$Log2Thr, grp_rowMetadata$SelectedProteins, sep="_")
+
+# Filter to remove empty rows
+# rowMetadata <- rowMetadata[rowSums(mat2PlotWide) > 0,]
+bim_mat2PlotWide <- bim_mat2PlotWide[rownames(bim_rowMetadata),]
+grp_mat2PlotWide <- grp_mat2PlotWide[rownames(grp_rowMetadata),]
+rownames(bim_mat2PlotWide) <- rownames(bim_rowMetadata)
+rownames(grp_mat2PlotWide) <- rownames(grp_rowMetadata)
+
+# Order by row sums
+bim_mat2PlotWide <- bim_mat2PlotWide[order(rowSums(bim_mat2PlotWide), decreasing=TRUE),]
+grp_mat2PlotWide <- grp_mat2PlotWide[order(rowSums(grp_mat2PlotWide), decreasing=TRUE),]
+
+# Remove with zero
+bim_mat2PlotWide <- bim_mat2PlotWide[rowSums(bim_mat2PlotWide) > 0,]
+grp_mat2PlotWide <- grp_mat2PlotWide[rowSums(grp_mat2PlotWide) > 0,]
+
+# Re-sort
+bim_rowMetadata <- bim_rowMetadata[rownames(bim_mat2PlotWide),]
+grp_rowMetadata <- grp_rowMetadata[rownames(grp_mat2PlotWide),]
+
+```
+
+```{r}
+
+filtGrpCandidatesNone <- grp_mat2PlotWide[grepl("No_0.5_",rownames(grp_mat2PlotWide)),
+                                          grepl("None", colnames(grp_mat2PlotWide))][,2,drop=FALSE]
+filtBimCandidatesNone <- bim_mat2PlotWide[grepl("No_0.5_",rownames(bim_mat2PlotWide)),
+                                          grepl("None", colnames(bim_mat2PlotWide))][,2,drop=FALSE]
+filtGrpCandidatesNone <- filtGrpCandidatesNone[filtGrpCandidatesNone >= 9,,drop=FALSE]
+filtBimCandidatesNone <- filtBimCandidatesNone[filtBimCandidatesNone >= 9,,drop=FALSE]
+filtGrpCandidatesNone <- unique(gsub(".*_", "", rownames(filtGrpCandidatesNone)))
+filtBimCandidatesNone <- unique(gsub(".*_", "", rownames(filtBimCandidatesNone)))
+
+# Keep any proteins detected at least > 7 times in all models in all except "None"
+filtGrpCandidates <- grp_mat2PlotWide[apply(grp_mat2PlotWide[,!grepl("None", colnames(grp_mat2PlotWide))], 1, function(row) all(row >= 7)),]
+filtGrpCandidates <- unique(gsub(".*_", "", rownames(filtGrpCandidates)))
+filtBimCandidates <- bim_mat2PlotWide[apply(bim_mat2PlotWide[,!grepl("None", colnames(bim_mat2PlotWide))], 1, function(row) all(row >= 7)),]
+filtBimCandidates <- unique(gsub(".*_", "", rownames(filtBimCandidates)))
+
+# # Get common
+filtGrpCandidates <- union(filtGrpCandidates,
+                           filtGrpCandidatesNone)
+filtBimCandidates <- union(filtBimCandidates,
+                           filtBimCandidatesNone)
+
+# Compare number of proteins
+length(filtGrpCandidates)
+length(filtBimCandidates)
+length(intersect(filtGrpCandidates,
+                 filtBimCandidates))
+
+# Get output dataframe
+finalTargets <- data.frame(Protein=union(filtBimCandidates, 
+                                         filtGrpCandidates))
+
+# Get models
+finalTargets["Model"] <- "MultiGroup"
+finalTargets[which(finalTargets$Protein %in% filtBimCandidates),]["Model"] <- "BiModal"
+finalTargets[which(finalTargets$Protein %in% filtBimCandidates & finalTargets$Protein %in% filtGrpCandidates),]["Model"] <- "Both"
+table(finalTargets$Model)
+
+```
+
+### Add correlated proteins
+
+```{r}
+
+# Get top correlated proteins
+corrM <- sapply(finalTargets$Protein, function(protID) cor(unlist(quantTableNorm[protID,]), 
+                                                           t(quantTableNorm[setdiff(rownames(quantTable_chosenMethod), finalTargets$Protein),]),
+                                                           use="pairwise.complete.obs"))
+rownames(corrM) <- setdiff(rownames(quantTable_chosenMethod), finalTargets$Protein)
+
+# Loop over candidates
+allCors <- vector(mode="list",
+                  length=ncol(corrM))
+for (i in seq_len(ncol(corrM))) {
+
+  # Sort most correlated and get any with corr > 0.7
+  topCorrs <- sort(abs(corrM[,i]),
+                   decreasing=TRUE)
+  topCorrs <- topCorrs[topCorrs > 0.7]
+
+  # Add to all
+  allCors[[i]] <- topCorrs[topCorrs > 0.7]
+
+}
+names(allCors) <- colnames(corrM)
+
+# Get all unique
+allUniq <- unique(names(unlist(unname(allCors))))
+
+# Loop over unique proteins
+protGroups <- vector(mode="list",
+                     length=length(allUniq))
+names(protGroups) <- allUniq
+for (protID in allUniq) {
+  
+  # Check prots
+  checkProts <- sapply(allCors, function(prots) protID %in% names(prots))
+  chosenProts <- names(checkProts[checkProts])
+  
+  # Check if bimodal, group or both
+  protGroups[[protID]] <- ifelse(any(chosenProts %in% filtBimCandidates & chosenProts %in% filtGrpCandidates),
+                                 "Both",
+                                 ifelse(any(chosenProts %in% filtGrpCandidates),
+                                        "MultiGroup",
+                                        "BiModal"))
+  
+}
+
+# Get if significant in stringent-filtered set
+topDEHits <- intersect(allUniq,
+                       diffDataSig[apply(diffDataSig[,c(2,3)], 1, function(row) any(abs(row) > 3)),]$PG_ID)
+
+
+```
+
+```{r}
+
+# Add correlators
+finalTargets <- rbind(finalTargets,
+                      data.frame(Protein=topDEHits,
+                                 Model=unlist(protGroups[topDEHits])))
+
+```
+
+### Save
+
+```{r}
+
+# Save final targets
+write.table(finalTargets,
+            here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp), "sampleRandom", "biomarkers", "modelComparison",
+                       "finalProteinList_biModal_multiGroupModels.tsv"),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE)
+
+```
+
+### Plot heatmaps dictating selection
+
+```{r}
+
+bimImp <- bim_rowMetadata[bim_rowMetadata$Imputed == "Yes",]
+  hmap1 <- Heatmap(bim_mat2PlotWide[bim_rowMetadata$Imputed == "Yes",],
+          
+          # Colour
+          col = colorRamp2(c(0, max(bim_mat2PlotWide)), c('white','salmon')),
+          
+          # Row/column splits/clustering
+          cluster_columns=FALSE,
+          cluster_rows=FALSE,
+          row_split=bim_rowMetadata[bim_rowMetadata$Imputed == "Yes",]$Log2Thr,
+          column_split=colnames(bim_mat2PlotWide),
+          row_title_rot=0,
+          row_title_gp = gpar(fontsize=172),
+          column_title_gp = gpar(fontsize=172),
+          
+          # Borders and splits
+          border=TRUE,
+          row_gap=unit(2.5, "cm"),
+          column_gap=unit(2.5, "cm"),
+  
+          # Row/column names
+          row_labels=as.character(bim_rowMetadata[bim_rowMetadata$Imputed == "Yes",]$SelectedProteins),
+          column_labels=rep(candidatePThr, length(imputationMethod)),
+          row_names_gp=gpar(fontsize=48),
+          column_names_gp=gpar(fontsize=84),
+          column_names_rot=0,
+          column_names_centered=TRUE,
+          row_names_side = "left",
+          column_names_side = "bottom",
+          
+          # Add cell functions
+          cell_fun = function(j, i, x, y, width, height, fill) {
+            
+            # If more than zero overlaps
+            if (bim_mat2PlotWide[bim_rowMetadata$Imputed == "Yes",][i,j] > 0) {
+            
+              # Add number of overlapping models
+              grid.text(sprintf("%d", bim_mat2PlotWide[bim_rowMetadata$Imputed == "Yes",][i, j]), x, y, gp = gpar(fontsize = 72))
+              
+            }
+            
+          },
+          
+          # Legend
+          heatmap_legend_param = list(title="Frequency of Models",
+                                          legend_direction="horizontal",
+                                          grid_height = unit(45, "mm"),
+                                          legend_width = unit(350, "mm"),
+                                          labels_gp = gpar(fontsize=72),
+                                          title_gp = gpar(fontsize=96,
+                                                          fontface="bold"),
+                                          border="black")
+          
+  )
+  
+bimUnImp <- bim_rowMetadata[bim_rowMetadata$Imputed == "No",]
+  hmap2 <- Heatmap(bim_mat2PlotWide[bim_rowMetadata$Imputed == "No",],
+          
+          # Colour
+          col = colorRamp2(c(0, max(bim_mat2PlotWide)), c('white','royalblue1')),
+                  
+          # Row/column splits/clustering
+          cluster_columns=FALSE,
+          cluster_rows=FALSE,
+          row_split=bim_rowMetadata[bim_rowMetadata$Imputed == "No",]$Log2Thr,
+          column_split=colnames(bim_mat2PlotWide),
+          row_title_rot=0,
+          row_title_gp = gpar(fontsize=172),
+          column_title_gp = gpar(fontsize=172),
+          
+          # Borders and splits
+          border=TRUE,
+          row_gap=unit(2.5, "cm"),
+          column_gap=unit(2.5, "cm"),
+  
+          # Row/column names
+          row_labels=as.character(bim_rowMetadata[bim_rowMetadata$Imputed == "No",]$SelectedProteins),
+          column_labels=rep(candidatePThr, length(imputationMethod)),
+          row_names_gp=gpar(fontsize=48),
+          column_names_gp=gpar(fontsize=84),
+          column_names_rot=0,
+          column_names_centered=TRUE,
+          row_names_side = "left",
+          column_names_side = "bottom",
+          
+          # Add cell functions
+          cell_fun = function(j, i, x, y, width, height, fill) {
+            
+            # If more than zero overlaps
+            if (bim_mat2PlotWide[bim_rowMetadata$Imputed == "No",][i,j] > 0) {
+            
+              # Add number of overlapping models
+              grid.text(sprintf("%d", bim_mat2PlotWide[bim_rowMetadata$Imputed == "No",][i, j]), x, y, gp = gpar(fontsize = 64))
+              
+            }
+            
+          },
+          
+          # Legend
+          heatmap_legend_param = list(title="Frequency of Models",
+                                          legend_direction="horizontal",
+                                          grid_height = unit(45, "mm"),
+                                          legend_width = unit(350, "mm"),
+                                          labels_gp = gpar(fontsize=72),
+                                          title_gp = gpar(fontsize=96,
+                                                          fontface="bold"),
+                                          border="black")
+          
+  )
+  
+  # Save
+  png(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp),"sampleRandom", "biomarkers", "modelComparison", "overlapProts",
+                 paste0("proteinSelectFreq_overlapBetweenSelectParams_imputedProteins_biModalModel.png")), units="px", width=3500, height=2500)
+  draw(hmap1, padding=unit(c(5,5,5,5), "cm"), heatmap_legend_side = "top")
+  dev.off()
+  png(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp),"sampleRandom", "biomarkers", "modelComparison", "overlapProts",
+                 paste0("proteinSelectFreq_overlapBetweenSelectParams_unimputedProteins_biModalModel.png")), units="px", width=3500, height=3500)
+  draw(hmap2, padding=unit(c(5,5,5,5), "cm"), heatmap_legend_side = "top")
+  dev.off()
+
+```
+
+```{r}
+
+grpImp <- grp_rowMetadata[grp_rowMetadata$Imputed == "Yes",]
+  hmap1 <- Heatmap(grp_mat2PlotWide[grp_rowMetadata$Imputed == "Yes",],
+          
+          # Colour
+          col = colorRamp2(c(0, max(grp_mat2PlotWide)), c('white','salmon')),
+          
+          # Row/column splits/clustering
+          cluster_columns=FALSE,
+          cluster_rows=FALSE,
+          row_split=grp_rowMetadata[grp_rowMetadata$Imputed == "Yes",]$Log2Thr,
+          column_split=colnames(grp_mat2PlotWide),
+          row_title_rot=0,
+          row_title_gp = gpar(fontsize=172),
+          column_title_gp = gpar(fontsize=172),
+          
+          # Borders and splits
+          border=TRUE,
+          row_gap=unit(2.5, "cm"),
+          column_gap=unit(2.5, "cm"),
+  
+          # Row/column names
+          row_labels=as.character(grp_rowMetadata[grp_rowMetadata$Imputed == "Yes",]$SelectedProteins),
+          column_labels=rep(candidatePThr, length(imputationMethod)),
+          row_names_gp=gpar(fontsize=48),
+          column_names_gp=gpar(fontsize=84),
+          column_names_rot=0,
+          column_names_centered=TRUE,
+          row_names_side = "left",
+          column_names_side = "bottom",
+          
+          # Add cell functions
+          cell_fun = function(j, i, x, y, width, height, fill) {
+            
+            # If more than zero overlaps
+            if (grp_mat2PlotWide[grp_rowMetadata$Imputed == "Yes",][i,j] > 0) {
+            
+              # Add number of overlapping models
+              grid.text(sprintf("%d", grp_mat2PlotWide[grp_rowMetadata$Imputed == "Yes",][i, j]), x, y, gp = gpar(fontsize = 64))
+              
+            }
+            
+          },
+          
+          
+          # Legend
+          heatmap_legend_param = list(title="Frequency of Models",
+                                          legend_direction="horizontal",
+                                          grid_height = unit(45, "mm"),
+                                          legend_width = unit(350, "mm"),
+                                          labels_gp = gpar(fontsize=72),
+                                          title_gp = gpar(fontsize=96,
+                                                          fontface="bold"),
+                                          border="black")
+          
+  )
+  
+  
+grpUnImp <- grp_rowMetadata[grp_rowMetadata$Imputed == "No",]
+  hmap2 <- Heatmap(grp_mat2PlotWide[grp_rowMetadata$Imputed == "No",],
+          
+          # Colour
+          col = colorRamp2(c(0, max(grp_mat2PlotWide)), c('white','royalblue1')),
+                  
+          # Row/column splits/clustering
+          cluster_columns=FALSE,
+          cluster_rows=FALSE,
+          row_split=grp_rowMetadata[grp_rowMetadata$Imputed == "No",]$Log2Thr,
+          column_split=colnames(grp_mat2PlotWide),
+          row_title_rot=0,
+          row_title_gp = gpar(fontsize=172),
+          column_title_gp = gpar(fontsize=172),
+          
+          # Borders and splits
+          border=TRUE,
+          row_gap=unit(2.5, "cm"),
+          column_gap=unit(2.5, "cm"),
+  
+          # Row/column names
+          row_labels=as.character(grp_rowMetadata[grp_rowMetadata$Imputed == "No",]$SelectedProteins),
+          column_labels=rep(candidatePThr, length(imputationMethod)),
+          row_names_gp=gpar(fontsize=48),
+          column_names_gp=gpar(fontsize=84),
+          column_names_rot=0,
+          column_names_centered=TRUE,
+          row_names_side = "left",
+          column_names_side = "bottom",
+          
+          # Add cell functions
+          cell_fun = function(j, i, x, y, width, height, fill) {
+            
+            # If more than zero overlaps
+            if (grp_mat2PlotWide[grp_rowMetadata$Imputed == "No",][i,j] > 0) {
+            
+              # Add number of overlapping models
+              grid.text(sprintf("%d", grp_mat2PlotWide[grp_rowMetadata$Imputed == "No",][i, j]), x, y, gp = gpar(fontsize = 48))
+              
+            }
+            
+          },
+          
+          # Legend
+          heatmap_legend_param = list(title="Frequency of Models",
+                                          legend_direction="horizontal",
+                                          grid_height = unit(45, "mm"),
+                                          legend_width = unit(350, "mm"),
+                                          labels_gp = gpar(fontsize=72),
+                                          title_gp = gpar(fontsize=96,
+                                                          fontface="bold"),
+                                          border="black")
+          
+  )
+    
+  # Save
+  png(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp),"sampleRandom", "biomarkers", "modelComparison", "overlapProts",
+                 paste0("proteinSelectFreq_overlapBetweenSelectParams_imputedProteins_multiGroupModel.png")), units="px", width=3500, height=6500)
+  draw(hmap1, padding=unit(c(5,5,5,5), "cm"), heatmap_legend_side = "top")
+  dev.off()
+  png(here::here(resCrossDiscoDir, paste0("trainSplitProp",trainSplitProp),"sampleRandom", "biomarkers", "modelComparison", "overlapProts",
+                 paste0("proteinSelectFreq_overlapBetweenSelectParams_unimputedProteins_multiGroupModel.png")), units="px", width=3500, height=6500)
+  draw(hmap2, padding=unit(c(5,5,5,5), "cm"), heatmap_legend_side = "top")
+  dev.off()
+
+```
+
+
+
+

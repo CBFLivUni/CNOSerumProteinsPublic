@@ -1,0 +1,1076 @@
+---
+title: "Validation Data Processing, Normalisation & QC"
+author: "Euan McDonnell"
+format: html
+editor: source
+---
+
+# Notes
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source metadata
+here::i_am("17_figurePreparation.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Save as RDS
+plotList <- readRDS(here::here(figDir, 
+                    "10_finalModel_figs.rds"))
+ 
+```
+
+
+## Load data
+
+### Metadata
+
+```{r}
+
+# Source metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata.R"))
+
+# Read in protein annotation
+proteinAnnotData_validData <- read.table(here::here(baseDataDir, "validation", "DIAProteomics", "directDIA_spectronautProcessed", "spectronaut", "20250409_PreSchool_2_20250312_ValidationData", 
+                                                    "2022_0105d_PreSchool_2_20250312_ValidationData_Report_BGS Analysis Grid View Report (Pivot).tsv"), sep="\t", quote="\"", header=TRUE)
+proteinAnnotData_validData <- proteinAnnotData_validData[!duplicated(proteinAnnotData_validData$PG.ProteinAccessions),c("PG.ProteinAccessions","PG.ProteinDescriptions","PG.ProteinNames")]
+proteinAnnotData_validData$PG.ProteinNames <- gsub("_HUMAN","",proteinAnnotData_validData$PG.ProteinNames)
+
+```
+
+### Metadata
+
+```{r}
+
+# Read in pivot table
+## Read in protein abundance table of actual samples
+metaCrossSectional_validData <- read.table(here::here(metaDir, "preSchool_validationData_tallFormatClean_validationData.tsv"), sep="\t", header=TRUE, quote="") 
+table(metaCrossSectional_validData$Condition)
+
+# Keep just child cross-sectional
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child",]
+table(metaCrossSectional_validData$Condition)
+
+# Exclude JIA
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Condition != "JIA",] #  & metaCrossSectional_validData$Condition != "Healthy"
+table(metaCrossSectional_validData$Condition)
+
+# Just conditions of interest
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Condition != "HPP",]
+
+# Drop ethnicity outliers
+# metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Ethnicity == "C" & !is.na(metaCrossSectional_validData$Ethnicity),]
+
+```
+
+### Quantification data
+
+```{r}
+
+# Read in pivot table
+## Read in protein abundance table of actual samples
+quantTable_validData <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "processed",
+                                              "validationData_pivotTable_PGQuantity.sampleIDs_noSerumQCs.tsv"), sep="\t", quote="\"", header=TRUE)
+rownames(quantTable_validData) <- quantTable_validData$PG.ProteinGroups
+
+```
+
+### Drop depleted proteins
+
+```{r}
+
+# Depleted prots
+depletedProtData <- read.table(here::here(baseDataDir, "annotation", "depletedProteinSet.txt"), sep="\t", header=FALSE)
+depletedProts <- depletedProtData$V2
+
+# Drop proteins
+nrow(quantTable_validData)
+quantTable_validData <- quantTable_validData[!quantTable_validData$PG.ProteinGroups %in% depletedProts,]
+nrow(quantTable_validData)
+
+```
+
+```{r}
+
+# Read in QC
+quantTable_validDataQCs <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "processed", "QCs",
+                                                "validData_pivotTable_PGQuantity.sampleIDs_justSerumQCs.tsv"), sep="\t", quote="\"", header=TRUE)
+rownames(quantTable_validDataQCs) <- quantTable_validDataQCs$PG.ProteinGroups
+quantTable_validDataQCs <- quantTable_validDataQCs[rownames(quantTable_validData),]
+
+# Visualise
+dim(quantTable_validDataQCs)
+
+```
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+### Get proteins detected in all Serum QC samples
+
+```{r}
+
+# Get
+rownames(quantTable_validDataQCs) <- quantTable_validDataQCs$PG.ProteinGroups
+serumProtsValid <- GetSerumQCProteins(serumQCData=quantTable_validDataQCs); length(serumProtsValid)
+
+```
+
+## Checking for drift
+
+```{r}
+
+# Tall format
+quantTable_validData_serumQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_validDataQCs), 
+                                                                    quantTable_validDataQCs[,2:ncol(quantTable_validDataQCs)]), id.vars=c("ID"))
+
+# Rename QCs
+quantTable_validData_serumQC_tall["variable"] <- gsub("PooledPlasma|_S.*","",quantTable_validData_serumQC_tall$variable)
+
+# Add metadata
+quantTable_validData_serumQC_tall["PLATE"] <- "P1"
+quantTable_validData_serumQC_tall[which(quantTable_validData_serumQC_tall$variable %in% c("QC3","QC4")),]["PLATE"] <- "P2"
+
+# Order
+quantTable_validData_serumQC_tall <- quantTable_validData_serumQC_tall[order(quantTable_validData_serumQC_tall$variable, decreasing=FALSE),]
+quantTable_validData_serumQC_tall$variable <- factor(quantTable_validData_serumQC_tall$variable, levels=unique(quantTable_validData_serumQC_tall$variable))
+
+# Plot
+p1 <- ggplot(quantTable_validData_serumQC_tall, 
+             aes(x=variable, 
+                 y=log2(value), 
+                 group=variable)) + 
+  geom_violin(fill="#99E6FF",
+              alpha=0.75) + 
+  geom_boxplot(outlier.size=1.5,
+               width=0.125) + 
+  ggtitle("Serum QC (Unfiltered)") +
+  xlab("Serum QC Sample") + ylab("Log2 Protein\nAbundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  theme_classic(base_size=48) +
+  theme(axis.title=element_text(size=72),
+        strip.text=element_text(size=72),
+        plot.title=element_text(size=56))
+
+# Save
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                  "validationData_serumQCSamples_proteinAbundance_unFiltered.png"),
+       p1,
+       units="px", width=5000, height=3500)
+
+# Add to list
+newList <- list(p1)
+names(newList) <- c("UnFiltProtAbundanceSerumQC_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+## Missing values
+
+### Enumerate frequencies of proteins missing in samples
+
+```{r, fig.height=5, fig.width=12}
+
+# Enumerate raw NAs
+## Protein
+perProtNAValid <- EnumerateNAs(quantTable_validData[,metaCrossSectional_validData$Sample_ID], idxVal=1)
+## Samples
+perSmplNAValid <- EnumerateNAs(quantTable_validData[,metaCrossSectional_validData$Sample_ID], idxVal=2)
+
+# Histogram
+protPlt <- ggplot(perProtNAValid,
+       aes(x=N_MISSING)) +
+  geom_histogram(fill="mediumblue") + 
+  theme_classic(base_size=16)
+smplPlt <- ggplot(perProtNAValid,
+       aes(x=N_MISSING)) +
+  geom_histogram(fill="mediumblue") + 
+  theme_classic(base_size=16)
+
+protPlt + smplPlt
+
+```
+
+### Enumerate frequencies of samples missing proteins
+
+```{r, fig.height=4, fig.width=12}
+ 
+# Test dropping values on frequencies of missing proteins and samples
+perProtNAValid_dropProts <- TestProteinDropThresholds(perProtNA=perProtNAValid, quantTbl=quantTable_validData[,metaCrossSectional_validData$Sample_ID], idxVal=1)
+perSmplNAValid_dropProts <- TestProteinDropThresholds(perProtNA=perSmplNAValid, quantTbl=quantTable_validData[,metaCrossSectional_validData$Sample_ID], idxVal=2)
+
+# Keep only serum QC proteins
+perProtNAValid_dropProts_serumQCOnly <- TestProteinDropThresholds(perProtNA=perProtNAValid[serumProtsValid,], 
+                                                                  quantTbl=quantTable_validData[serumProtsValid,metaCrossSectional_validData$Sample_ID], idxVal=1)
+perSmplNAValid_dropProts_serumQCOnly <- TestProteinDropThresholds(perProtNA=EnumerateNAs(quantTable_validData[serumProtsValid,metaCrossSectional_validData$Sample_ID], idxVal=2),
+                                                                  quantTbl=quantTable_validData[serumProtsValid,metaCrossSectional_validData$Sample_ID], idxVal=2)
+
+# Histogram
+protPlt <- ggplot(perProtNAValid_dropProts,
+       aes(x=N_MISSING)) +
+  geom_histogram(fill="mediumblue") + 
+  facet_grid(cols=vars(PERCENTAGE)) +
+  theme_classic(base_size=16)
+smplPlt <- ggplot(perSmplNAValid_dropProts,
+       aes(x=N_MISSING)) +
+  geom_histogram(fill="mediumblue") + 
+  facet_grid(cols=vars(PERCENTAGE)) +
+  theme_classic(base_size=16)
+
+protPlt
+smplPlt
+
+```
+
+### Add to metadata
+
+```{r}
+
+# Combine
+totalNProtsValid <- do.call("rbind",lapply(unique(perProtNAValid_dropProts$PERCENTAGE), function(perc) 
+                                    data.frame(PERCENTAGE=perc, FREQ=nrow(perProtNAValid_dropProts[perProtNAValid_dropProts$PERCENTAGE == perc,]))))
+totalNProtsValid_serumQC <- do.call("rbind",lapply(unique(perProtNAValid_dropProts_serumQCOnly$PERCENTAGE), function(perc) 
+                                    data.frame(PERCENTAGE=perc, FREQ=nrow(perProtNAValid_dropProts_serumQCOnly[perProtNAValid_dropProts_serumQCOnly$PERCENTAGE == perc,]))))
+
+```
+
+### Correlate N missing with abundance
+
+```{r}
+
+# Correlate abundance and number of missing values
+MeanFreqMissing_valid <- data.frame(MeanAbundance=rowMeans(quantTable_validData[,metaCrossSectional_validData$Sample_ID], na.rm=TRUE),
+                                    FreqMissing=apply(quantTable_validData[,metaCrossSectional_validData$Sample_ID], 
+                                                      1, function(row) length(row[is.na(row)])))
+
+# Plot
+## Correlate valid-sectional
+stats::cor(MeanFreqMissing_valid[MeanFreqMissing_valid$FreqMissing > 0,]$MeanAbundance, 
+    MeanFreqMissing_valid[MeanFreqMissing_valid$FreqMissing > 0,]$FreqMissing, method="spearman", use="complete.obs")
+
+# Plot
+ggplot(MeanFreqMissing_valid[MeanFreqMissing_valid$FreqMissing > 0,], aes(x=base::log2(MeanAbundance), y=FreqMissing)) + 
+  geom_point() + 
+  xlab("base::log2 Mean Protein Abundance") + ylab("Frequency of Missing") +
+  theme_classic(base_size=16) + theme(axis.title=element_text(size=24))
+
+```
+
+### Keep only serum proteins
+
+```{r}
+
+# Keep serum proteins
+quantTable_validData <- quantTable_validData[serumProtsValid,]
+quantTable_validDataQCs <- quantTable_validDataQCs[serumProtsValid,]
+
+```
+
+## Checking for drift
+
+```{r}
+
+# Tall format
+quantTable_validData_serumQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_validDataQCs), 
+                                                                    quantTable_validDataQCs[,2:ncol(quantTable_validDataQCs)]), id.vars=c("ID"))
+
+# Rename QCs
+quantTable_validData_serumQC_tall["variable"] <- gsub("PooledPlasma|_S.*","",quantTable_validData_serumQC_tall$variable)
+
+# Add metadata
+quantTable_validData_serumQC_tall["PLATE"] <- "P1"
+quantTable_validData_serumQC_tall[which(quantTable_validData_serumQC_tall$variable %in% c("QC3","QC4")),]["PLATE"] <- "P2"
+
+# Order
+quantTable_validData_serumQC_tall <- quantTable_validData_serumQC_tall[order(quantTable_validData_serumQC_tall$variable, decreasing=FALSE),]
+quantTable_validData_serumQC_tall$variable <- factor(quantTable_validData_serumQC_tall$variable, levels=unique(quantTable_validData_serumQC_tall$variable))
+
+# Plot
+p1 <- ggplot(quantTable_validData_serumQC_tall, 
+             aes(x=variable, 
+                 y=log2(value), 
+                 group=variable)) + 
+  geom_violin(fill="#99E6FF",
+              alpha=0.75) + 
+  geom_boxplot(outlier.size=1.5,
+               width=0.125) + 
+  ggtitle("Serum QC (Filtered for Missingness)") +
+  xlab("Serum QC Sample") + ylab("Log2 Protein\nAbundance") +
+  facet_grid(cols=vars(PLATE), scales="free", space="free") +
+  theme_classic(base_size=48) +
+  theme(axis.title=element_text(size=72),
+        strip.text=element_text(size=72),
+        plot.title=element_text(size=56))
+
+# Save
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed",
+                  "validationData_serumQCSamples_proteinAbundance_filteredForNoNaMissingInSerumQCProts.png"),
+       p1,
+       units="px", width=5000, height=3500)
+
+# Add to list
+newList <- list(p1)
+names(newList) <- c("SerumQCFiltProtAbundanceSerumQC_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Add to metadata
+
+```{r}
+
+# Combine with metadata
+perSmplNAValid_dropProts <- merge(perSmplNAValid_dropProts, metaCrossSectional_validData, by.x="ID", by.y="Sample_ID")
+perSmplNAValid_dropProts_serumQCOnly <- merge(perSmplNAValid_dropProts_serumQCOnly, metaCrossSectional_validData, by.x="ID", by.y="Sample_ID")
+
+```
+
+### Plot
+
+NOTE: Not filtering proteins separately by plate.
+
+```{r, fig.width=3.5, fig.height=2}
+
+# Cross-sectional
+source(here::here("utilities", "R", "codeModules", "plotting", "plotMissingness_crossSectional_validation.R"))
+
+# Save
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                  "propMissingValues_missingValueThresholds.png"),
+       boxPlt,
+       units="px", width=4000, height=4000)
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                  "propMissingValues_missingValueThresholds_byPlate.png"),
+       boxPltByPlate,
+       units="px", width=10000, height=3000)
+
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                  "propMissingValues_missingValueThresholds_justSerumQC.png"),
+       boxPlt_serumQCOnly,
+       units="px", width=4000, height=4000)
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                  "propMissingValues_missingValueThresholds_justSerumQC_byPlate.png"),
+       boxPltByPlate_serumQCOnly,
+       units="px", width=10000, height=3000)
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                  "nProteins_missingValueThresholds.png"),
+       barPlt + barPlt_serumQCOnly +
+         plot_layout(nrow=2,
+                     axis_titles = "collect") &
+         theme_classic(base_size=48) &
+         theme(axis.title=element_text(size=56),
+               axis.text.x=element_text(size=32)),
+       units="px", width=4000, height=4000)
+
+# Make big
+bigPlt <- barPlt + barPlt_serumQCOnly +
+          plot_layout(nrow=2,
+                      guides = "collect",
+                      axis_titles = "collect")
+ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                  "nProteins_missingValueThresholds.png"),
+       bigPlt,
+       units="px", width=4000, height=4000)
+
+# Add to list
+newList <- list(boxPlt,
+                boxPlt_serumQCOnly,
+                barPlt + theme_classic(base_size=48) + theme(axis.title=element_text(size=56),
+                                                        axis.text.x=element_text(size=32)),
+                barPlt_serumQCOnly + theme_classic(base_size=48) + theme(axis.title=element_text(size=56),
+                                                                    axis.text.x=element_text(size=32)))
+names(newList) <- c("PropMissingValsUnFilt_validData",
+                    "PropMissingValsSerumQCProts_validData",
+                    "NProtsAllProts_validData",
+                    "NProtsSerumQCProts_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Investigate samples with high numbers of missing proteins
+
+Define this as \> 50%
+
+```{r}
+
+# Check proportion missing
+perSmplNAValid_dropProts[perSmplNAValid_dropProts$PROP_MISSING > 0.5,]
+
+```
+
+### Filter quantification sample
+
+Dont filter samples except for those with high missingness
+
+```{r}
+
+# Ensure consistent
+serumProtsValid <- intersect(rownames(quantTable_validData),
+                             serumProtsValid)
+
+# Retain only serum QC proteins
+quantTable_validData <- quantTable_validData[serumProtsValid,]
+dim(quantTable_validData)
+
+# Drop proteins with high frequencies of missing values
+validPropProts <- EnumerateNAs(quantTable_validData[serumProtsValid,], idx=1)
+quantTable_validData <- quantTable_validData[validPropProts[validPropProts$PROP_MISSING < maxPropMissing,]$ID,]
+
+# Define samples with high frequencies of missing values
+validPropSmpls <- EnumerateNAs(quantTable_validData[,metaCrossSectional_validData$Sample_ID], idx=2)
+validPropSmpls <- merge(validPropSmpls, metaCrossSectional_validData, by.x="ID", by.y="Sample_ID")
+table(validPropSmpls[validPropSmpls$PROP_MISSING >= maxPropMissing_samples,]$Condition)
+
+# Order by missingness
+validPropSmpls[order(validPropSmpls$PROP_MISSING, decreasing=TRUE),]
+
+# Subset
+quantTable_validData <- data.frame(PG.ProteinAccessions=rownames(quantTable_validData), 
+                                   quantTable_validData[,c(validPropSmpls[validPropSmpls$PROP_MISSING < maxPropMissing_samples,]$ID)])
+
+# Ensure consistent
+serumProtsValid <- intersect(rownames(quantTable_validData),
+                             serumProtsValid)
+
+rownames(metaCrossSectional_validData) <- metaCrossSectional_validData$Sample_ID
+table(metaCrossSectional_validData[colnames(quantTable_validData)[-1],]$Condition)
+sum(table(metaCrossSectional_validData[colnames(quantTable_validData)[-1],]$Condition))
+
+```
+
+### Enumerate missing values by sample again
+
+Check proper filtration
+
+```{r}
+
+# Enumerate more missing values per sample
+validPropSmpls <- EnumerateNAs(quantTable_validData, idx=2)
+
+# Check proportion of missing
+validPropSmpls[validPropSmpls$PROP_MISSING >= maxPropMissing_samples,]
+
+```
+
+### Subset metadata to match filtered columns
+
+```{r}
+
+# Subset metadata
+metaCrossSectional_validData <- metaCrossSectional_validData[which(metaCrossSectional_validData$Sample_ID %in% colnames(quantTable_validData)),]
+
+```
+
+### Check protein and sample missing rates
+
+```{r}
+
+# Check max missingness
+if (base::max(EnumerateNAs(quantTable_validData[,metaCrossSectional_validData$Sample_ID], idx=2)$PROP_MISSING) >= maxPropMissing_samples) { 
+  
+  warning("Sample Missingness for Validation data not controlled at desired level") 
+  
+}
+
+# Check max missingness
+if (base::max(EnumerateNAs(quantTable_validData[,metaCrossSectional_validData$Sample_ID], idx=1)$PROP_MISSING) >= maxPropMissing) { 
+  
+  warning("Protein Missingness for Validation data not controlled at desired level") 
+  
+}
+
+```
+
+### Report missingness now
+
+```{r}
+
+# SUbset metadta
+metaCrossSectional_validData <- metaCrossSectional_validData[colnames(quantTable_validData)[-1],]
+
+# Check mean missingess by protein and samples
+max(EnumerateNAs(quantTable_validData[,metaCrossSectional_validData$Sample_ID], idx=1)$PROP_MISSING)
+max(EnumerateNAs(quantTable_validData[,metaCrossSectional_validData$Sample_ID], idx=2)$PROP_MISSING)
+
+```
+
+### Save
+
+```{r}
+
+# Create output
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered"), showWarnings=FALSE, recursive=TRUE)
+
+# Save cross-Sectional
+write.table(quantTable_validData, here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered", 
+                                             paste0("validationData_quantTable.filtBy_serumQCProts_maxMissing",maxPropMissing,".tsv")), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Checking for drift
+
+```{r, fig.width=10}
+
+# Subset
+quantTable_validDataQCs <- quantTable_validDataQCs[rownames(quantTable_validData),]
+
+# Tall format
+quantTable_validData_serumQC_tall <- reshape2::melt(data.frame(ID=rownames(quantTable_validDataQCs), 
+                                                               quantTable_validDataQCs[,2:ncol(quantTable_validDataQCs)]), id.vars=c("ID"))
+
+# Order
+quantTable_validData_serumQC_tall <- quantTable_validData_serumQC_tall[order(quantTable_validData_serumQC_tall$variable, decreasing=FALSE),]
+quantTable_validData_serumQC_tall$variable <- factor(quantTable_validData_serumQC_tall$variable, levels=unique(quantTable_validData_serumQC_tall$variable))
+
+# Plot
+ggplot(quantTable_validData_serumQC_tall, aes(x=variable, y=base::log2(value))) + 
+  geom_boxplot() + ggtitle("Serum QC (Cross-Sectional)") +
+  xlab("Serum QC Sample") + ylab("base::log2 Protein Abundance") +
+  theme_classic()
+
+```
+
+### Cluster missing values
+
+#### Preprocess and define colours
+
+```{r}
+
+# Prepare matrices
+quantTableValid_naZeros <- quantTable_validData[,metaCrossSectional_validData$Sample_ID]
+
+# Set non-zero to 1
+quantTableValid_naZeros[!is.na(quantTableValid_naZeros)] <- 1
+
+# Set NA to 0
+quantTableValid_naZeros[is.na(quantTableValid_naZeros)] <- 0
+
+# Tidy names
+colnames(quantTableValid_naZeros) <- gsub(" Osteo","\nOsteo",colnames(quantTableValid_naZeros))
+
+# Harmonize data with metadata
+quantTableValid_naZeros <- quantTableValid_naZeros[,metaCrossSectional_validData$Sample_ID]
+
+# Define shared color
+metaCrossSectional_validData$Age[is.na(metaCrossSectional_validData$Age)] <- 0
+mainColFun = colorRamp2(c(0, 1), c("white", "mediumblue"))
+ageColFun_cross  = colorRamp2(c(0,min(metaCrossSectional_validData$Age, na.rm=T), max(metaCrossSectional_validData$Age, na.rm=T)), c("darkgrey","white","darkred"))
+
+```
+
+# Empty chart
+
+png(file=here::here(diaEdaDir, "conditionLegenedPlot.png"), units="px", height=45, width=500) \# No margin around chart par(mar=c(0,0,0,0)) plot(0, 0, type = "n", xlim = c(0, 1), ylim = c(0, 1), axes = FALSE, xlab = "", ylab = "")
+
+# Settings
+
+line \<- 1 col \<- length(condCols)
+
+# Add color background
+
+rect(\
+rep((0:(col - 1)/col),line) ,\
+sort(rep((0:(line - 1)/line),col),decreasing=T),\
+rep((1:col/col),line) , sort(rep((1:line/line),col),decreasing=T),\
+border = "white" , col=condCols\[seq(1,line\*col)\])
+
+# Color names
+
+text(\
+rep((0:(col - 1)/col),line)+0.1 ,\
+sort(rep((0:(line - 1)/line),col),decreasing=T)+0.5 , names(condCols)\[seq(1,line\*col)\] , cex=1)
+
+dev.off()
+
+#### Plot as heatmaps
+
+```{r}
+
+# Generate output
+dir.create(here::here(resDir, "validation", "eda"))
+
+# Heatmap
+crossPlt <- Heatmap(quantTableValid_naZeros[,metaCrossSectional_validData$Sample_ID],
+                    
+                    # Names
+                    # name = "Child",
+                    
+                    # Colours
+                    col = mainColFun,
+                    
+                    # Legend direction
+                    heatmap_legend_param = list(title = "base::log2 Abundance",
+                                                direction = "horizontal",
+                                                legend_width = unit(10, "cm"),
+                                                grid_height = unit(1.25, "cm"),
+                                                labels_gp = gpar(fontsize=38),
+                                                legend_gp = gpar(fontsize=72)),
+                    show_heatmap_legend =FALSE,
+                    
+                    # Clustering
+                    clustering_distance_rows = "manhattan",
+                    clustering_distance_columns = "manhattan",
+                    
+                    # Columns
+                    column_title_rot = 65,
+                    column_split = metaCrossSectional_validData[colnames(quantTableValid_naZeros[,metaCrossSectional_validData$Sample_ID]),]$PLATE,
+                    top_annotation = HeatmapAnnotation(Condition = anno_simple(metaCrossSectional_validData$Condition,
+                                                                               simple_anno_size = unit(2, "cm"), col=condCols),
+                                                       Age = anno_simple(metaCrossSectional_validData$Age, col = ageColFun_cross,
+                                                                         simple_anno_size = unit(2, "cm")),
+                                                       Sex = anno_simple(metaCrossSectional_validData$Sex, col=sexCols,
+                                                                         simple_anno_size = unit(2, "cm")),
+                                                       Plate = anno_simple(as.character(metaCrossSectional_validData$PLATE), col=plateCols,
+                                                                           simple_anno_size = unit(2, "cm")),
+                                                       Site = anno_simple(as.character(metaCrossSectional_validData$Site), col=siteCols,
+                                                                          simple_anno_size = unit(2, "cm")),
+                                                       annotation_name_gp= gpar(fontsize = 48)),
+                    column_title_gp = gpar(fontsize = 42, fontface = "bold"),
+                    
+                    # Rows
+                    show_row_names = FALSE,
+                    border = TRUE
+)
+
+png(file=here::here(resDir, "crossSectional", "validation", "eda", "imputationCheck_naZeroHeatmap_splitByPlate_validationData.png"), units="px", width=2500, height=2500)
+draw(crossPlt, ht_gap = unit(5, "cm"), heatmap_legend_side = "bottom", legend_title_gp = gpar(fontsize=72),
+     column_title="Validation Data (Split by Plate)")
+dev.off()
+
+# Heatmap
+crossPlt <- Heatmap(quantTableValid_naZeros[,metaCrossSectional_validData$Sample_ID],
+                    
+                    # Names
+                    # name = "Child",
+                    
+                    # Colours
+                    col = mainColFun,
+                    
+                    # Legend direction
+                    heatmap_legend_param = list(title = "base::log2 Abundance",
+                                                direction = "horizontal",
+                                                legend_width = unit(10, "cm"),
+                                                grid_height = unit(1.25, "cm"),
+                                                labels_gp = gpar(fontsize=38),
+                                                legend_gp = gpar(fontsize=72)),
+                    show_heatmap_legend =FALSE,
+                    
+                    # Clustering
+                    clustering_distance_rows = "manhattan",
+                    clustering_distance_columns = "manhattan",
+                    
+                    # Columns
+                    column_title_rot = 65,
+                    column_split = metaCrossSectional_validData[colnames(quantTableValid_naZeros[,metaCrossSectional_validData$Sample_ID]),]$Condition,
+                    top_annotation = HeatmapAnnotation(Condition = anno_simple(metaCrossSectional_validData$Condition,
+                                                                               simple_anno_size = unit(2, "cm"), col=condCols),
+                                                       Age = anno_simple(metaCrossSectional_validData$Age, col = ageColFun_cross,
+                                                                         simple_anno_size = unit(2, "cm")),
+                                                       Sex = anno_simple(metaCrossSectional_validData$Sex, col=sexCols,
+                                                                         simple_anno_size = unit(2, "cm")),
+                                                       Plate = anno_simple(as.character(metaCrossSectional_validData$PLATE), col=plateCols,
+                                                                           simple_anno_size = unit(2, "cm")),
+                                                       Site = anno_simple(as.character(metaCrossSectional_validData$Site), col=siteCols,
+                                                                          simple_anno_size = unit(2, "cm")),
+                                                       annotation_name_gp= gpar(fontsize = 48)),
+                    column_title_gp = gpar(fontsize = 42, fontface = "bold"),
+                    
+                    # Rows
+                    show_row_names = FALSE,
+                    border = TRUE
+)
+
+png(file=here::here(resDir, "crossSectional", "validation", "eda", "imputationCheck_naZeroHeatmap_splitByCondition_validationData.png"), units="px", width=2500, height=2500)
+draw(crossPlt, ht_gap = unit(5, "cm"), heatmap_legend_side = "bottom", legend_title_gp = gpar(fontsize=72),
+     column_title="Validation Data (Split by Condition)")
+dev.off()
+
+# Heatmap
+crossPlt <- Heatmap(quantTableValid_naZeros[,metaCrossSectional_validData$Sample_ID],
+                    
+                    # Names
+                    # name = "Child",
+                    
+                    # Colours
+                    col = mainColFun,
+                    
+                    # Legend direction
+                    heatmap_legend_param = list(title = "base::log2 Abundance",
+                                                direction = "horizontal",
+                                                legend_width = unit(10, "cm"),
+                                                grid_height = unit(1.25, "cm"),
+                                                labels_gp = gpar(fontsize=38),
+                                                legend_gp = gpar(fontsize=72)),
+                    show_heatmap_legend =FALSE,
+                    
+                    # Clustering
+                    clustering_distance_rows = "manhattan",
+                    clustering_distance_columns = "manhattan",
+                    
+                    # Columns
+                    column_title_rot = 65,
+                    top_annotation = HeatmapAnnotation(Condition = anno_simple(metaCrossSectional_validData$Condition,
+                                                                               simple_anno_size = unit(2, "cm"), col=condCols),
+                                                       Age = anno_simple(metaCrossSectional_validData$Age, col = ageColFun_cross,
+                                                                         simple_anno_size = unit(2, "cm")),
+                                                       Sex = anno_simple(metaCrossSectional_validData$Sex, col=sexCols,
+                                                                         simple_anno_size = unit(2, "cm")),
+                                                       Plate = anno_simple(as.character(metaCrossSectional_validData$PLATE), col=plateCols,
+                                                                           simple_anno_size = unit(2, "cm")),
+                                                       Site = anno_simple(as.character(metaCrossSectional_validData$Site), col=siteCols,
+                                                                          simple_anno_size = unit(2, "cm")),
+                                                       annotation_name_gp= gpar(fontsize = 48)),
+                    column_title_gp = gpar(fontsize = 42, fontface = "bold"),
+                    
+                    # Rows
+                    show_row_names = FALSE,
+                    border = TRUE
+)
+
+png(file=here::here(resDir, "crossSectional", "validation", "eda", "imputationCheck_naZeroHeatmap_validationData.png"), units="px", width=2500, height=2500)
+draw(crossPlt, ht_gap = unit(5, "cm"), heatmap_legend_side = "bottom", legend_title_gp = gpar(fontsize=72),
+     column_title="Validation Data")
+dev.off()
+
+
+```
+
+### View distributions as boxplots
+
+```{r}
+
+# Get as tall
+rawValidTall <- melt(data.frame(ID=rownames(quantTable_validData), 
+                                base::log2(quantTable_validData[,metaCrossSectional_validData$Sample_ID])), id.vars="ID")
+
+# Merge with
+rawValidTall <- merge(rawValidTall, metaCrossSectional_validData, by.x="variable", by.y="Sample_ID")
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","Age_Group","PLATE","Site")) {
+
+  # Plot
+  plt <- ggplot(rawValidTall, aes(x=variable, y=value, fill=.data[[fctr]])) + 
+    geom_boxplot() + 
+    xlab("Samples") + ylab("Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic() + theme(axis.text.x=element_blank(), 
+                       legend.position="top") +
+    guides(fill=guide_legend(nrow=1, byRow=TRUE))
+  print(plt)
+  
+}  
+
+```
+
+### Generate Summarize Experiment for DEP
+
+```{r}
+
+# Generate design matrix
+designValid_m <- data.frame(label=rownames(metaCrossSectional_validData), 
+                            Sex=metaCrossSectional_validData$Sex, 
+                            Age=metaCrossSectional_validData$Age, 
+                            condition=metaCrossSectional_validData$Condition)
+rownames(designValid_m) <- metaCrossSectional_validData$Sample_ID
+
+# Add replicate column
+designValid_m["replicate"] <- NA
+for (cond in unique(designValid_m$condition)) { designValid_m[designValid_m$condition == cond,]["replicate"] <- 1:nrow(designValid_m[designValid_m$condition == cond,]) }
+
+# Make summarized experiment
+uniqNames_quantTableValid  <- make_unique(quantTable_validData[,c("PG.ProteinAccessions","PG.ProteinAccessions",metaCrossSectional_validData$Sample_ID)], 
+                                          names="PG.ProteinAccessions", ids="PG.ProteinAccessions", delim=";")
+seValid <- make_se(uniqNames_quantTableValid, which(colnames(uniqNames_quantTableValid) %in% metaCrossSectional_validData$Sample_ID), designValid_m)
+
+# Rough fix I think
+assay(seValid)[is.nan(assay(seValid))] <- NA
+
+```
+
+### Plot frequencies for missing values
+
+```{r}
+
+# Plot protein identification overlaps
+plot_frequency(seValid) + theme(axis.text=element_blank())
+
+# Plot protein identification overlaps (stacked bars)
+plot_coverage(seValid) + theme(legend.position="none")
+
+# Plot proteins per samples
+plot_numbers(seValid) + scale_fill_manual(values=condCols) + 
+  theme(axis.text.x=element_blank(), legend.position="none") 
+
+```
+
+### Scale and normalise with VSN
+
+```{r}
+
+# Normalise
+## VSN
+normValid <- normalize_vsn(seValid)
+
+# Plot SD
+meanSdPlot(normValid)
+
+# Check mix/min for VSN - some strange things here with some parameterisations
+min(assay(normValid), na.rm=T)
+
+```
+
+### View distributions as boxplots
+
+```{r}
+
+# Get as tall
+normValidTall <- melt(data.frame(ID=rownames(assay(normValid)), assay(normValid)), id.vars="ID")
+seValidTall <- melt(data.frame(ID=rownames(assay(seValid)), assay(seValid)), id.vars="ID")
+
+# Merge with column data
+normValidTall <- merge(normValidTall, data.frame(colData(normValid)), by.x="variable", by.y="ID")
+seValidTall <- merge(seValidTall, data.frame(colData(seValid)), by.x="variable", by.y="ID")
+
+# Merge with
+normValidTall <- merge(normValidTall[,c("variable","ID","label","value")], metaCrossSectional_validData, by.x="label", by.y="Sample_ID")
+seValidTall <- merge(seValidTall[,c("variable","ID","label","value")], metaCrossSectional_validData, by.x="label", by.y="Sample_ID")
+
+```
+
+### View distributions as boxplots
+
+```{r}
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","Age_Group","PLATE","Site")) { # ,"Ethnicity"
+
+  # Plot
+  plt <- ggplot(normValidTall, aes(x=variable, y=value, fill=.data[[fctr]])) + 
+    geom_boxplot() + 
+    xlab("Samples") + ylab("Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic() + theme(axis.text.x=element_blank(), 
+                       legend.position="top") +
+    guides(fill=guide_legend(nrow=1, byRow=TRUE))
+  print(plt)
+  
+}
+
+```
+
+### Plot sample distributions
+
+```{r}
+
+# Get number of conditions per site
+freqCondPerSite <- melt(data.frame(table(metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child",][,c("Condition","Site")])))
+
+# Get proportion of conditions per site
+freqCondPerSite["Prop"] <- NA
+sites <- unique(freqCondPerSite$Site)
+for (i in seq_len(length(sites))) { freqCondPerSite[freqCondPerSite$Site == sites[[i]],]["Prop"] <- freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value / sum(freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value) }
+
+# Plot freq
+plt1 <- ggplot(freqCondPerSite,
+       aes(x=Site, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of\nSamples") +
+  theme_classic()
+
+# Plot freq
+plt2 <- ggplot(freqCondPerSite,
+       aes(x=Site, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Proportio of Samples (in Site)") +
+  theme_classic()
+
+plt1
+plt2
+
+# save
+ggsave(here::here(resDir, "crossSectional", "validation", "eda",
+                  paste0("proteinAbundanceDistribution_validationData_missingnormonMissing_empiricalDistributions.png")),
+       plt1, width=5000, height=2750, units="px")
+
+```
+
+
+```{r}
+
+# Get number of conditions per Plate
+freqCondPerPlate <- melt(data.frame(table(metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child" & metaCrossSectional_validData$Condition != "JIA",][,c("Condition","PLATE")])))
+
+# Get proportion of conditions per Plate
+freqCondPerPlate["Prop"] <- NA
+Plates <- unique(freqCondPerPlate$PLATE)
+for (i in seq_len(length(Plates))) { freqCondPerPlate[freqCondPerPlate$PLATE == Plates[[i]],]["Prop"] <- freqCondPerPlate[freqCondPerPlate$PLATE == Plates[[i]],]$value / sum(freqCondPerPlate[freqCondPerPlate$PLATE == Plates[[i]],]$value) }
+
+# Plot freq
+ggplot(freqCondPerPlate,
+       aes(x=PLATE, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of Samples") +
+  theme_classic()
+
+# Plot prob
+ggplot(freqCondPerPlate,
+       aes(x=PLATE, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Proportion of Samples (in Plate)") +
+  theme_classic()
+
+# Plot freq 
+ggplot(aggregate(value ~ Condition + variable, data=freqCondPerPlate[,c("Condition","value","variable")], FUN=sum),
+       aes(x=variable, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of Samples") +
+  xlab("") + 
+  theme_classic() + theme(axis.text.x=element_blank())
+
+
+```
+
+### Plot sample distributions
+
+```{r}
+
+# Get number of conditions per site
+freqCondPerSite <- melt(data.frame(table(metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child",][,c("Condition","Site")])))
+
+# Get proportion of conditions per site
+freqCondPerSite["Prop"] <- NA
+sites <- unique(freqCondPerSite$Site)
+for (i in seq_len(length(sites))) { freqCondPerSite[freqCondPerSite$Site == sites[[i]],]["Prop"] <- freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value / sum(freqCondPerSite[freqCondPerSite$Site == sites[[i]],]$value) }
+
+# Plot freq
+plt1 <- ggplot(freqCondPerSite,
+       aes(x=Site, y=value, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Number of\nSamples") +
+  theme_classic(base_size=36) + theme(axis.title=element_text(size=88),
+                                 axis.text=element_text(size=42),
+                                 legend.text=element_text(size=42)) +
+  guides(fill=guide_legend(override.aes=list(size=12)))
+
+# Plot freq
+plt2 <- ggplot(freqCondPerSite,
+       aes(x=Site, y=Prop, fill=Condition)) + 
+  geom_bar(stat="identity", color="black", position="stack") +
+  scale_fill_manual(values=condCols) +
+  ylab("Proportio of\nSamples") +
+  theme_classic(base_size=36) + theme(axis.title=element_text(size=88),
+                                 axis.text=element_text(size=42),
+                                 legend.text=element_text(size=42)) +
+  guides(fill=guide_legend(override.aes=list(size=12)))
+
+# Plot
+plt <- plt1 + plt2 +
+         plot_layout(nrow=1,
+                     guides = "collect",
+                     axis_titles = "collect")
+
+# save
+ggsave(here::here(resValidDir, "eda", 
+                  paste0("sampleGroupNumbers_bySite_afterFiltration.png")),
+       plt, width=10000, height=4000, units="px")
+
+# Add to list
+newList <- list(plt1)
+names(newList) <- c("sampleConditionGroupNumbers_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Save filtered metadata
+
+```{r}
+
+# Save metadata
+write.table(metaCrossSectional_validData, here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                                                     "preSchool_validationData_tallFormatClean_samplesFiltered_byMissingness.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Plot abundances of depleted proteins
+
+Test to see group-structure of depleted proteins is present prior to any real normalisation or processing.
+
+```{r}
+
+# Add if depleted protein
+qntTable_depletedProt <- reshape2::melt(quantTable_validData[c("P02768","P02763","P01023","P01011"),], id.vars="PG.ProteinAccessions")
+qntTable_depletedProt <- merge(metaCrossSectional_validData[metaCrossSectional_validData$Site != "Leiden" & metaCrossSectional_validData$Condition != "JIA",], qntTable_depletedProt, by.x="Sample_ID", by.y="variable")
+
+# Plot
+ggplot(qntTable_depletedProt, 
+       aes(y=base::log2(value), x=Condition, fill=Condition)) +
+  geom_boxplot() + 
+  geom_jitter(size=0.75) +
+  facet_grid(cols=vars(PG.ProteinAccessions), scale="free_y", space="free_y") +
+  scale_fill_manual(values=condCols) +
+  theme_classic() + theme(axis.text=element_blank())
+
+```
+
+### Save filtered proteins
+
+```{r}
+
+# Save proteisn
+saveRDS(rownames(quantTable_validData[,metaCrossSectional_validData$Sample_ID]), 
+        here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                   paste0("filteredProteinSet_validationData_maxMissing",maxPropMissing,".rds")))
+
+# Save quant table
+saveRDS(quantTable_validData[,metaCrossSectional_validData$Sample_ID], 
+        here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                   paste0("filtered_unNormalised_validationData_maxMissing",maxPropMissing,".rds")))
+write.table(quantTable_validData[,metaCrossSectional_validData$Sample_ID], 
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered", 
+                       paste0("filtered_unNormalised_validationData_maxMissing",maxPropMissing,".tsv")), sep="\t", quote=FALSE)
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "11_validationDataProcessQC_figs.rds"))
+
+```
+
+
+
+
+
+

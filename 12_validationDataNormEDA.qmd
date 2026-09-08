@@ -1,0 +1,1678 @@
+---
+title: "Validation Data Normalisation & EDA"
+author: "Euan McDonnell"
+format: html
+editor: source
+---
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source metadata
+here::i_am("12_validationDataNormEDA.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# Save as RDS
+plotList <- readRDS(here::here(figDir, 
+                    "11_validationDataProcessQC_figs.rds"))
+ 
+```
+
+## Load data
+
+### Metadata
+
+```{r}
+
+# Source BModal CNO Discovery study metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata.R"))
+
+# Read in pivot table
+## Read in protein abundance table of actual samples
+metaCrossSectional_validData <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                                                     "preSchool_validationData_tallFormatClean_samplesFiltered_byMissingness.tsv"), sep="\t", header=TRUE) 
+rownames(metaCrossSectional_validData) <- metaCrossSectional_validData$Sample_ID
+
+# Keep just child cross-sectional
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Age_Group == "Child",]
+table(metaCrossSectional_validData$Condition)
+
+# Exclude JIA
+metaCrossSectional_validData <- metaCrossSectional_validData[metaCrossSectional_validData$Condition != "JIA",]
+table(metaCrossSectional_validData$Condition)
+
+```
+
+### Source colours
+
+```{r}
+
+source(here::here("params", "colors.R"))
+
+```
+
+### Quantification data
+
+```{r}
+
+# Read in pivot table
+## Read in protein abundance table 
+quantTable_validData <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered", 
+                                              paste0("filtered_unNormalised_validationData_maxMissing",maxPropMissing,".tsv")), 
+                                   sep="\t", quote="\"", header=TRUE)
+quantTable_discoData <- read.table(here::here(diaDir, "normalised", "crossSectional_quantTable_normalisedCyclicLoess.tsv"), 
+                                   sep="\t", quote="\"", header=TRUE, row.names=1)
+
+# Read in QCs
+quantTable_validData_serumQC <- read.table(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "processed", "QCs",
+                                                "validData_pivotTable_PGQuantity.sampleIDs_justSerumQCs.tsv"),
+                                           sep="\t", quote="\"", header=TRUE)
+rownames(quantTable_validData_serumQC) <- quantTable_validData_serumQC$PG.ProteinGroups
+quantTable_validData_serumQC <- quantTable_validData_serumQC[,-1]
+
+# Combine data
+quantTable_validWithQCs <- cbind(quantTable_validData_serumQC[rownames(quantTable_validData),], 
+                                 quantTable_validData)
+                                 
+
+# Read BModal CNO Discovery imputed data
+discoveryProts_qntTable <- read.table(here::here(diaDir, "normalised", paste0("crossSectional_quantTable_normalisedCyclicLoess.tsv")), sep="\t", header=TRUE, row.names=1)
+
+```
+
+#### Format metadata for NormalyzerDE
+
+```{r}
+
+# Sort metadata
+forNormDEMeta <- plyr::rename(metaCrossSectional_validData[colnames(quantTable_validData),c("Sample_ID","Condition","Sex","Age","PLATE")], 
+                              c("Sample_ID"="sample", "Condition"="group", "PLATE"="Plate"))
+
+## Subset metadata
+forNormDEMeta <- plyr::rename(metaCrossSectional_validData[colnames(quantTable_validData),c("Sample_ID","Condition")], 
+                              c("Sample_ID"="sample", "Condition"="group"))
+forNormDEMeta <- rbind(data.frame(sample=colnames(quantTable_validData_serumQC)[-1],
+                                  group=rep("Serum_QC", ncol(quantTable_validData_serumQC)-1)),
+                                  forNormDEMeta)
+
+## Save metadata
+write.table(forNormDEMeta, 
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                       "preSchool_validationData_groupIsCondition_forNormalyzerDE.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+## Save metadata
+write.table(forNormDEMeta, 
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                       "preSchool_validationData_groupIsPlate_forNormalyzerDE.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+# Save abundance data
+write.table(cbind(PG.ProteinAccessions=rownames(quantTable_validWithQCs), quantTable_validWithQCs[,forNormDEMeta$sample]),
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                       paste0("validationData_quantTable.filtBy_serumQCProts_maxMissing",0.3,".withSerumQCSamples.forNormalyzerDE.tsv")),
+            sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+#### Run Normalyzer
+
+Based on: https://www.bioconductor.org/packages/release/bioc/vignettes/NormalyzerDE/inst/doc/vignette.html
+
+```{r}
+
+# Create object for NormalyzerDE
+experimentObj_byCond  <- setupRawDataObject(designPath=here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                                                                  "preSchool_validationData_groupIsCondition_forNormalyzerDE.tsv"), 
+                                            dataPath=here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered", 
+                                                                paste0("validationData_quantTable.filtBy_serumQCProts_maxMissing",0.3,".withSerumQCSamples.forNormalyzerDE.tsv")))
+experimentObj_byPlate <- setupRawDataObject(designPath=here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered",
+                                                                  "preSchool_validationData_groupIsPlate_forNormalyzerDE.tsv"), 
+                                            dataPath=here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "filtered", 
+                                                                paste0("validationData_quantTable.filtBy_serumQCProts_maxMissing",0.3,".withSerumQCSamples.forNormalyzerDE.tsv")))
+normObj_byCond <- getVerifiedNormalyzerObject("metaValidData_NormalyzerDE_byCondition", 
+                                              experimentObj_byCond,
+                                              noLogTransform=TRUE)
+normObj_byPlate <- getVerifiedNormalyzerObject("metaValidData_NormalyzerDE_byPlate", 
+                                               experimentObj_byPlate,
+                                               noLogTransform=TRUE)
+
+# Normalise
+normResults_byCond <- normMethods(normObj_byCond)
+normResults_byPlate <- normMethods(normObj_byPlate)
+
+# Generate performance measures
+normResultsWithEval_byCond <- analyzeNormalizations(normResults_byCond)
+normResultsWithEval_byPlate <- analyzeNormalizations(normResults_byPlate)
+
+# Save results
+jobDir_byCond <-  setupJobDir("metaValidData_NormalyzerDE_byCondition", 
+                              here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised"))
+jobDir_byPlate <-  setupJobDir("metaValidData_NormalyzerDE_byPlate", 
+                              here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised"))
+writeNormalizedDatasets(normResultsWithEval_byCond, jobDir_byCond)
+writeNormalizedDatasets(normResultsWithEval_byPlate, jobDir_byPlate)
+
+# Plots
+generatePlots(normResultsWithEval_byCond, jobDir_byCond)
+generatePlots(normResultsWithEval_byPlate, jobDir_byPlate)
+
+```
+
+### Read in normalised data
+
+```{r}
+
+# List files
+normFiles <- list.files(path=jobDir_byCond, pattern="*.txt")
+normMs <- lapply(normFiles, function(file) read.table(here::here(jobDir_byCond, file), sep="\t", header=TRUE, row.names=1))
+names(normMs) <- gsub("-.*|.*_|[.]txt","",normFiles)
+
+```
+
+### Check if normalised data with LOESS is unsupervised
+
+Cyclic LOESS may be spliting by group-data to normalise which may be problematic for downstream modelling. Check this by manually normalising nad commparing normalised matrices. Have to round for slight variations in precision of normaliastion.
+
+```{r}
+
+# Check
+cycLoessNorm <- limma::normalizeCyclicLoess(base::log2(as.matrix(quantTable_validWithQCs[,forNormDEMeta$sample])), method="fast")
+
+# Get whether LOESS is unsupervisde
+checkLoessUnSupervised <- all(round(as.matrix(cycLoessNorm[,colnames(normMs$CycLoess)]), 8) == round(as.matrix(as.matrix(normMs$CycLoess)), 8), na.rm=TRUE)
+if (!checkLoessUnSupervised) { warning("LOESS APPEARS TO NOT BE UNSUPERVISED, IT MIGHT BE CONSIDERING GROUP DATA")}
+
+```
+
+### Save
+
+```{r}
+
+# Save
+write.table(data.frame(ProteinGroup=rownames(normMs$CycLoess), normMs$CycLoess), 
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised",
+                       "validationData_quantTable_normalisedCyclicLoess.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+write.table(data.frame(ProteinGroup=rownames(normMs$CycLoess), normMs$CycLoess[,!grepl("QC",colnames(normMs$CycLoess))]), 
+            here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised",
+                       "validationData_quantTable_normalisedCyclicLoess_noQCSamples.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+
+```
+
+### Process normalised data
+
+```{r}
+
+# Make tall
+normTall <- lapply(names(normMs), function(method) data.frame(reshape2::melt(data.frame(ProtID=rownames(normMs[[method]]), normMs[[method]]), id.vars="ProtID"), Method=method))
+names(normTall) <- names(normMs)
+  
+# Combine
+normTall <- do.call("rbind",normTall)
+
+# Retain only QC samples
+normTall_qcOnly <- normTall[grepl("QC",normTall$variable),]
+
+```
+
+### Plot
+
+```{r}
+
+# Split by Serum/instrument QC
+normTall_qcOnly["QCType"] <- "Serum QC"
+
+# Rename instrument QC
+# normTall_qcOnly$variable <- gsub("Serum.*Instrument|late","",normTall_qcOnly$variable)
+
+# Split into serum/instrument QC
+serumQC_norm <- normTall_qcOnly[normTall_qcOnly$QCType == "Serum QC",]
+
+# Retain only proteins that had missing values to impute missing values
+serumQC_norm_qcOnly <- serumQC_norm[which(serumQC_norm$ProtID %in% 
+                                                    rownames(quantTable_validData_serumQC[,!grepl("Instrument",colnames(quantTable_validData_serumQC))])),]
+  
+# Plot
+serumQC_plt <- ggplot(serumQC_norm_qcOnly, aes(x=variable, y=log2(value))) + 
+         geom_boxplot() + ggtitle("Serum QC Samples Only") +
+         geom_jitter() +
+         xlab("QC Sample") + ylab("Log2 Protein Abundance") +
+         facet_wrap(~ Method, ncol=4,
+                    scale="free_y") +
+         theme_classic(base_size=16) + 
+         theme(axis.text=element_blank(),
+               axis.title=element_text(size=48),
+               plot.title=element_text(size=64),
+               strip.text=element_text(size=32))
+
+```
+
+### Get data without normalisation
+
+```{r}
+
+# Extract normalised data
+normData <- normMs$CycLoess
+
+# Drop QCs
+normData <- normData[,!grepl("QC",colnames(normData))]
+
+# Drop NAs
+normData_noNA <- normData[!is.na(rowSums(normData)),]
+dim(normData_noNA)
+
+```
+
+### View raw distributions as boxplots
+
+```{r, fig.height=3, fig.width=6}
+
+# Get as tall
+rawCrossTall <- melt(data.frame(ID=rownames(quantTable_validData), 
+                                log2(quantTable_validData[,metaCrossSectional_validData$Sample_ID])), id.vars="ID")
+
+# Merge with
+rawCrossTall <- merge(rawCrossTall, metaCrossSectional_validData, by.x="variable", by.y="Sample_ID")
+
+# Get list of colours
+allColors <- list(Sex=sexCols,
+                  Condition=condCols,
+                  Site=siteCols,
+                  PLATE=plateCols)
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","PLATE","Site")) {
+
+  # Plot
+  p1 <- ggplot(rawCrossTall[rawCrossTall$Age_Group == "Child",], 
+               aes(x=variable, 
+                   y=value, 
+                   fill=.data[[fctr]])) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=allColors[[fctr]]) +
+    xlab("Samples") + ylab("Log2 Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic(base_size=48) + 
+    theme(axis.text.x=element_blank(), 
+          axis.ticks.x=element_blank(),
+          axis.title.x=element_text(size=72),
+          axis.title.y=element_text(size=60),
+          strip.text=element_blank(),
+          legend.text=element_text(size=28),
+          legend.title=element_blank(),
+          legend.position="top") +
+    guides(fill=guide_legend(nrow=1, 
+                             byRow=TRUE, 
+                             override.aes=list(size=16)))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised",
+                    paste0("sampleAbundanceDistribution_splitBy",fctr,"_rawAbundances_childSamples.png")),
+         p1,
+         units="px", width=5000, height=2750)
+
+  if (fctr == "Condition") {
+    
+    # Add to list
+    newList <- list(p1)
+    names(newList) <- c("sampleAbundDistribution_colByCondition_raw_validData")
+    plotList <- append(plotList,
+                       newList)
+    
+  }
+  
+}
+
+```
+
+### View normalised distributions as boxplots
+
+```{r, fig.height=3, fig.width=6}
+
+# Get as tall
+normCrossTall <- melt(data.frame(ID=rownames(normMs$CycLoess), 
+                                normMs$CycLoess[,metaCrossSectional_validData$Sample_ID]), id.vars="ID")
+# Merge with
+normCrossTall <- merge(normCrossTall, metaCrossSectional_validData, by.x="variable", by.y="Sample_ID")
+
+# Loop over factors and color/facet
+for (fctr in c("Sex","Condition","PLATE","Site")) {
+
+  # Plot
+  p1 <- ggplot(normCrossTall[normCrossTall$Age_Group == "Child",], 
+               aes(x=variable, 
+                   y=value, 
+                   fill=.data[[fctr]])) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=allColors[[fctr]]) +
+    xlab("Samples") + ylab("Log2 Abundance") +
+    facet_grid(cols=vars(.data[[fctr]]), scale="free", space="free") +
+    theme_classic(base_size=48) + 
+    theme(axis.text.x=element_blank(), 
+          axis.ticks.x=element_blank(),
+          axis.title.x=element_text(size=72),
+          axis.title.y=element_text(size=60),
+          strip.text=element_blank(),
+          legend.text=element_text(size=28),
+          legend.title=element_blank(),
+          legend.position="top") +
+    guides(fill=guide_legend(nrow=1, 
+                             byRow=TRUE, 
+                             override.aes=list(size=16)))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised",
+                    paste0("sampleAbundanceDistribution_splitBy",fctr,"_cycLoessNormAbundances_childSamples.png")),
+         p1,
+         units="px", width=5000, height=2750)
+
+  if (fctr == "Condition") {
+    
+    # Add to list
+    newList <- list(p1)
+    names(newList) <- c("sampleAbundDistribution_colByCondition_cyclicLoessNorm_validData")
+    plotList <- append(plotList,
+                       newList)
+    
+  }
+  
+}
+
+```
+
+### PCA
+
+#### Run PCA
+
+```{r}
+
+# Run PCA
+validPCA <- prcomp(t(normData_noNA[!is.na(rowSums(normData_noNA)),metaCrossSectional_validData$Sample_ID]), center=TRUE, scale=TRUE)
+
+# Merge with metadata
+validPCA_metaData <- merge(metaCrossSectional_validData[,!grepl("^PC",colnames(metaCrossSectional_validData))], validPCA$x, by.x="Sample_ID", by.y="row.names")
+
+```
+
+#### Plot
+
+```{r}
+
+# Create output directories
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins"), recursive=TRUE, showWarnings=FALSE)
+
+# Loop over PCs
+## All together
+for (i in 1:9) {
+  
+  # Plot
+  # Technical
+  plate_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Plate") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  row_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="ROW", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Row") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  col_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="COLUMN", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Column") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  ## Biological
+  condLab_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top")) +
+          geom_text_repel(data=validPCA_metaData[which(validPCA_metaData$Sample_ID %in% c("PS_DR_095", "PS_DR_110", "PS_DR_111", "PS_DR_112")),],
+                          aes(x=.data[[paste0("PC", i)]], 
+                              y=.data[[paste0("PC", i + 1)]], 
+                              label=Sample_ID),
+                          size=12,
+                          max.overlaps=10)
+  cond_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  sex_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=sexCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  age_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_continuous(high="darkred", low="white") +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  ageGroup_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Age_Group", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=ageGroupCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Age Group") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlate.cycLoessNorm_validationData_allSamples.png")), plate_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlateRow.cycLoessNorm_validationData_allSamples.png")), row_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlateColumn.cycLoessNorm_validationData_allSamples.png")), col_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByCondition.cycLoessNorm_validationData_allSamples.png")), cond_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByCondition_labBySampleID.cycLoessNorm_validationData_allSamples.png")), condLab_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colBySex.cycLoessNorm_validationData_allSamples.png")), sex_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByAge.cycLoessNorm_validationData_allSamples.png")), age_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "allProteins",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByAgeGroup.cycLoessNorm_validationData_allSamples.png")), ageGroup_plt, width=6000, height=4000, units="px")
+  
+}
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=7) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt)
+names(newList) <- c("normAbundancePCA_colByCondition_validData",
+                    "normAbundancePCA_colBySite_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Read in desired proteins
+
+```{r}
+
+# Read in chosen prots
+chosenProts <- data.frame(read.table(here::here(resDir, "crossSectional", "discovery", "trainSplitProp0.8", "sampleRandom", "biomarkers", "finalModel",
+                                                "finalTargetProteins.tsv"), sep="\t", header=TRUE))
+rownames(chosenProts) <- chosenProts$Protein
+
+# Check common proteins
+commonProts <- intersect(chosenProts$Protein, rownames(quantTable_validData))
+chosenProts[commonProts,]
+
+```
+
+### PCA on multi-group selected proteins
+
+#### Run PCA
+
+```{r}
+
+# Get BModal CNO Discovery proteins
+discoveryProts_qntTable <- normData_noNA[commonProts,]
+
+# Run PCA
+validPCA <- prcomp(t(discoveryProts_qntTable[!is.na(rowSums(discoveryProts_qntTable)),metaCrossSectional_validData$Sample_ID]), center=TRUE, scale=TRUE)
+
+# Merge with metadata
+validPCA_metaData <- merge(metaCrossSectional_validData[,!grepl("^PC",colnames(metaCrossSectional_validData))], validPCA$x, by.x="Sample_ID", by.y="row.names")
+
+```
+
+#### Plot
+
+```{r}
+
+# Create output directories
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup"), recursive=TRUE, showWarnings=FALSE)
+
+# Loop over PCs
+## All together
+for (i in 1:7) {
+  
+  # Plot
+  # Technical
+  plate_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Plate") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  row_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="ROW", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Row") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  col_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="COLUMN", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Column") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  ## Biological
+  cond_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  sex_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=sexCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  age_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_continuous(high="darkred", low="white") +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  ageGroup_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Age_Group", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=ageGroupCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Age Group") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlate.cycLoessNorm_validationData_allSamples_justMultiGroupSelectedProtein.png")), plate_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlateRow.cycLoessNorm_validationData_allSamples_justMultiGroupSelectedProtein.png")), row_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlateColumn.cycLoessNorm_validationData_allSamples_justMultiGroupSelectedProtein.png")), col_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByCondition.cycLoessNorm_validationData_allSamples_justMultiGroupSelectedProtein.png")), cond_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colBySex.cycLoessNorm_validationData_allSamples_justMultiGroupSelectedProtein.png")), sex_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByAge.cycLoessNorm_validationData_allSamples_justMultiGroupSelectedProtein.png")), age_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "multiGroup",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByAgeMultiGroupSelected.cycLoessNorm_validationData_allSamples_justMultiGroupSelectedProtein.png")), ageGroup_plt, width=6000, height=4000, units="px")
+  
+}
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=7) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt)
+names(newList) <- c("normAbundancePCA_multiGroupProts_colByCondition_validData",
+                    "normAbundancePCA_multiGroupProts_colBySite_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### PCA on bi-modal selected proteins
+
+#### Run PCA
+
+```{r}
+
+# Get CNO-specific models
+biModalCommonProts <- intersect(chosenProts[chosenProts$Model == "Both" | chosenProts$Model == "BiModal",]$Protein, 
+                                rownames(quantTable_validData))
+
+# Get BModal CNO Discovery proteins
+discoveryProts_qntTable <- normData_noNA[intersect(rownames(normData_noNA), biModalCommonProts),]
+
+# Run PCA
+validPCA <- prcomp(t(discoveryProts_qntTable[!is.na(rowSums(discoveryProts_qntTable)),metaCrossSectional_validData$Sample_ID]), center=TRUE, scale=TRUE)
+
+# Merge with metadata
+validPCA_metaData <- merge(metaCrossSectional_validData[,!grepl("^PC",colnames(metaCrossSectional_validData))], validPCA$x, by.x="Sample_ID", by.y="row.names")
+
+```
+
+#### Plot
+
+```{r}
+
+# Create output directories
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal"), recursive=TRUE, showWarnings=FALSE)
+
+# Loop over PCs
+## All together
+for (i in 1:3) {
+  
+  # Plot
+  # Technical
+  plate_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Plate") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  row_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="ROW", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Row") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  col_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="COLUMN", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Column") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  ## Biological
+  cond_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  sex_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=sexCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  age_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_continuous(high="darkred", low="white") +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  ageGroup_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Age_Group", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=ageGroupCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=36)) +
+    labs(fill="Age Group") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlate.cycLoessNorm_validationData_allSamples_justBiModalCNOSelectedProtein.png")), plate_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlateRow.cycLoessNorm_validationData_allSamples_justBiModalCNOSelectedProtein.png")), row_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByPlateColumn.cycLoessNorm_validationData_allSamples_justBiModalCNOSelectedProtein.png")), col_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByCondition.cycLoessNorm_validationData_allSamples_justBiModalCNOSelectedProtein.png")), cond_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colBySex.cycLoessNorm_validationData_allSamples_justBiModalCNOSelectedProtein.png")), sex_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByAge.cycLoessNorm_validationData_allSamples_justBiModalCNOSelectedProtein.png")), age_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "pca", "justCandidateProteins", "BiModal",
+                    paste0("PCA_biplot.pc",i,"to",i+1,".colByAgeBiModalCNOSelected.cycLoessNorm_validationData_allSamples_justBiModalCNOSelectedProtein.png")), ageGroup_plt, width=6000, height=4000, units="px")
+  
+}
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=validPCA_metaData, var=get_eigenvalue(validPCA), color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=7) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt)
+names(newList) <- c("normAbundancePCA_biModalProts_colByCondition_validData",
+                    "normAbundancePCA_biModalProts_colBySite_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Probabilistic PCA 
+
+Base off of: https://www.bioconductor.org/packages/release/bioc/vignettes/pcaMethods/inst/doc/pcaMethods.pdf
+
+quantTable_crossSectional \<- data.frame(PG.ProteinAccessions=rownames(quantTable_crossSectional), quantTable_crossSectional\[,c(crossPropSmpls\[crossPropSmpls$PROP_MISSING < maxPropMissing,]$ID)\]) quantTable_longitudinal \<- data.frame(PG.ProteinAccessions=rownames(quantTable_longitudinal), quantTable_longitudinal\[,c(longPropSmpls\[longPropSmpls$PROP_MISSING < maxPropMissing,]$ID)\])
+
+#### Run PCA
+
+```{r}
+
+# Fit probabilistic PCA
+set.seed(35353)
+resPPCA <- pcaMethods::pca(t(normData[,metaCrossSectional_validData$Sample_ID]), 
+                           method="ppca", center=TRUE, scale="pareto", cv="q2", nPcs=10)
+
+# Combine with metadata
+resPPCA_data <- merge(metaCrossSectional_validData, pcaMethods::scores(resPPCA), by.x="Sample_ID", "row.names")
+
+# Get variance explained
+varExpl <- list(variance.percent=(sDev(resPPCA) / sum(sDev(resPPCA)))  * 100)
+
+```
+
+#### Plot
+
+```{r}
+
+# Create output directories
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins"),
+           recursive=TRUE, showWarnings=FALSE)
+
+# Loop over PCs
+## All together
+for (i in 1:9) {
+  
+  # Plot
+  # Technical
+  plate_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Plate") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  row_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="ROW", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Row") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  col_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="COLUMN", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Column") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  ## Biological
+  cond_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  condLab_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top")) +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top")) +
+          geom_text_repel(data=resPPCA_data[which(resPPCA_data$Sample_ID %in% c("PS_DR_095", "PS_DR_110", "PS_DR_111", "PS_DR_112")),],
+                          aes(x=.data[[paste0("PC", i)]], 
+                              y=.data[[paste0("PC", i + 1)]], 
+                              label=Sample_ID),
+                          size=12,
+                          max.overlaps=10)
+  sex_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=sexCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  age_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_continuous(high="darkred", low="white") +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  ageGroup_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Age_Group", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=ageGroupCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Age Group") +
+    ggtitle("Validation Cohort: All Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlate.validationData_allSamples.png")), plate_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlateRow.validationData_allSamples.png")), row_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlateColumn.validationData_allSamples.png")), col_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByCondition.validationData_allSamples.png")), cond_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByCondition_labBySampleID.validationData_allSamples.png")), condLab_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colBySex.validationData_allSamples.png")), sex_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByAge.validationData_allSamples.png")), age_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "allProteins",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByAgeGroup.validationData_allSamples.png")), ageGroup_plt, width=6000, height=4000, units="px")
+  
+}
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=7) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt)
+names(newList) <- c("normAbundancePPCA_colByCondition_validData",
+                    "normAbundancePPCA_colBySite_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Probabilistic PCA: Mulit-group proteins
+
+#### Run PCA
+
+```{r}
+
+# Fit probabilistic PCA
+set.seed(35353)
+resPPCA <- pcaMethods::pca(t(normData[commonProts,metaCrossSectional_validData$Sample_ID]), 
+                           method="ppca", center=TRUE, scale="pareto", cv="q2", nPcs=10)
+
+# Combine with metadata
+resPPCA_data <- merge(metaCrossSectional_validData, pcaMethods::scores(resPPCA), by.x="Sample_ID", "row.names")
+
+# Get variance explained
+varExpl <- list(variance.percent=(sDev(resPPCA) / sum(sDev(resPPCA)))  * 100)
+
+```
+
+#### Plot
+
+```{r}
+
+# Create output directories
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup"),
+           recursive=TRUE, showWarnings=FALSE)
+
+# Loop over PCs
+## All together
+for (i in 1:9) {
+  
+  # Plot
+  # Technical
+  plate_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Plate") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  row_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="ROW", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Row") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  col_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="COLUMN", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Column") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  ## Biological
+  cond_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  sex_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=sexCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  age_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_continuous(high="darkred", low="white") +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  ageGroup_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Age_Group", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=ageGroupCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Age Group") +
+    ggtitle("Validation Cohort: Multi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlate.validationData_allSamples_justMultiGroupSelectedProteins.png")), plate_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlateRow.validationData_allSamples_justMultiGroupSelectedProteins.png")), row_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlateColumn.validationData_allSamples_justMultiGroupSelectedProteins.png")), col_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByCondition.validationData_allSamples_justMultiGroupSelectedProteins.png")), cond_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colBySex.validationData_allSamples_justMultiGroupSelectedProteins.png")), sex_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByAge.validationData_allSamples_justMultiGroupSelectedProteins.png")), age_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "multiGroup",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByAgeGroup.validationData_allSamples_justMultiGroupSelectedProteins.png")), ageGroup_plt, width=6000, height=4000, units="px")
+  
+}
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=7) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt)
+names(newList) <- c("normAbundancePPCA_multiGroupProts_colByCondition_validData",
+                    "normAbundancePPCA_multiGroupProts_colBySite_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+
+### Probabilistic PCA: BiModal proteins
+
+#### Run PCA
+
+```{r}
+
+# Fit probabilistic PCA
+set.seed(35353)
+resPPCA <- pcaMethods::pca(t(normData[biModalCommonProts,metaCrossSectional_validData$Sample_ID]), 
+                           method="ppca", center=TRUE, scale="pareto", cv="q2", nPcs=10)
+
+# Combine with metadata
+resPPCA_data <- merge(metaCrossSectional_validData, pcaMethods::scores(resPPCA), by.x="Sample_ID", "row.names")
+
+# Get variance explained
+varExpl <- list(variance.percent=(sDev(resPPCA) / sum(sDev(resPPCA)))  * 100)
+
+```
+
+#### Plot
+
+```{r}
+
+# Create output directories
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal"),
+           recursive=TRUE, showWarnings=FALSE)
+
+# Loop over PCs
+## All together
+for (i in 1:4) {
+  
+  # Plot
+  # Technical
+  plate_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Plate") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  row_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="ROW", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Row") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  col_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="COLUMN", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Column") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  ## Biological
+  cond_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, shape_by="Age_Group", color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  sex_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=sexCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  age_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_continuous(high="darkred", low="white") +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  ageGroup_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Age_Group", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=ageGroupCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Age Group") +
+    ggtitle("Validation Cohort: Bi-Modal Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlate.validationData_allSamples_justMultiGroupSelectedProteins.png")), plate_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlateRow.validationData_allSamples_justMultiGroupSelectedProteins.png")), row_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlateColumn.validationData_allSamples_justMultiGroupSelectedProteins.png")), col_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByCondition.validationData_allSamples_justMultiGroupSelectedProteins.png")), cond_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colBySex.validationData_allSamples_justMultiGroupSelectedProteins.png")), sex_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByAge.validationData_allSamples_justMultiGroupSelectedProteins.png")), age_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "probPCA", "justCandidateProteins", "biModal",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByAgeGroup.validationData_allSamples_justMultiGroupSelectedProteins.png")), ageGroup_plt, width=6000, height=4000, units="px")
+  
+}
+
+```
+
+#### Plot required for paper
+
+```{r}
+
+# Plot
+site_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, shape_by="Age_Group", color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Site") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=resPPCA_data, var=varExpl, color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=7) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(shape="Age Group") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt)
+names(newList) <- c("normAbundancePPCA_biModalProts_colByCondition_validData",
+                    "normAbundancePPCA_biModalProts_colBySite_validData")
+plotList <- append(plotList,
+                   newList)
+
+```
+
+### Combine validation/BModal CNO Discovery
+
+```{r}
+
+
+# Combine data
+quantTable_combStudy <- merge(cycLoessNorm,
+                              quantTable_discoData,
+                              by="row.names")
+rownames(quantTable_combStudy) <- quantTable_combStudy$Row.names
+quantTable_combStudy <- quantTable_combStudy[,!grepl("Row[.]names", colnames(quantTable_combStudy))]
+
+```
+
+#### PPCA on data
+
+```{r}
+
+# Run PCA
+set.seed(35353)
+combPCA <- pcaMethods::pca(t(quantTable_combStudy), 
+                           method="ppca", center=TRUE, scale="pareto", cv="q2", nPcs=10)
+
+# Combine with metadata
+combPCA_metaData <- merge(rbind(metaCrossSectional_validData[,c("Sample_ID","Age","Sex","PLATE","Condition","Site", "Data_Group")],
+                                metaCrossSectional[metaCrossSectional$Age_Group == "Child",c("Sample_ID","Age","Sex","PLATE","Condition","Site", "Data_Group")]), 
+                           scores(combPCA), by.x="Sample_ID", by.y="row.names")
+combPCA_metaData[combPCA_metaData$Data_Group == "TrainTest",]["Data_Group"] <- "Discovery"
+
+# Get variance explained
+varExpl <- list(variance.percent=(sDev(combPCA) / sum(sDev(combPCA)))  * 100)
+
+```
+
+#### Plot
+
+```{r}
+
+# Create output directories
+dir.create(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "combined"),
+           recursive=TRUE, showWarnings=FALSE)
+
+# Loop over PCs
+## All together
+for (i in 1:9) {
+  
+  # Plot
+  # Technical
+  plate_plt <- Plot2DPCA(meta=combPCA_metaData, var=varExpl, color_by="PLATE", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=plateCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    labs(fill="Plate") +
+    ggtitle("Validation & Discovery\nCohorts: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  ## Biological
+  cond_plt <- Plot2DPCA(meta=combPCA_metaData, var=varExpl, color_by="Condition", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation & Discovery\nCohorts: All Proteins") +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  sex_plt <- Plot2DPCA(meta=combPCA_metaData, var=varExpl, color_by="Sex", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_manual(values=sexCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation & Discovery\nCohorts: All Proteins") +
+    guides(fill=guide_legend(ncol=1,title.position="top", override.aes=list(shape=21)), shape=guide_legend(ncol=1,title.position="top"))
+  age_plt <- Plot2DPCA(meta=combPCA_metaData, var=varExpl, color_by="Age", label_id="Sample_ID", pcs=c(i, i+1), pch_size=7) + 
+    scale_fill_continuous(high="darkred", low="white") +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    ggtitle("Validation & Discovery\nCohorts: All Proteins") +
+    guides(fill=guide_colourbar(barheight=10, title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+  
+  # Save
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "combined",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByPlate.validationData_allSamples.png")), plate_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "combined",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByCondition.validationData_allSamples.png")), cond_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "combined",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colBySex.validationData_allSamples.png")), sex_plt, width=6000, height=4000, units="px")
+  ggsave(here::here(validDir, "DIAProteomics", "directDIA_spectronautProcessed", "normalised", "combined",
+                    paste0("probPCA_biplot.pc",i,"to",i+1,".colByAge.validationData_allSamples.png")), age_plt, width=6000, height=4000, units="px")
+  
+}
+
+```
+
+#### Plot required for paper
+
+```{r, fig.width=32, fig.height=32}
+
+# Plot
+site_plt <- Plot2DPCA(meta=combPCA_metaData, var=varExpl, color_by="Site", label_id="Sample_ID", pcs=c(1, 2), pch_size=7) + 
+    scale_shape_manual(values=c(21, 24)) + 
+    scale_fill_manual(values=siteCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+cond_plt <- Plot2DPCA(meta=combPCA_metaData, var=varExpl, color_by="Condition", label_id="Sample_ID", pcs=c(1,2), pch_size=7) + 
+    scale_fill_manual(values=tidyCondCols) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.title=element_text(size=42),
+          plot.title=element_text(size=64)) +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+study_plt <- Plot2DPCA(meta=combPCA_metaData, var=varExpl, color_by="Data_Group", pcs=c(1,2), pch_size=12) + 
+    scale_fill_manual(values=c("Validation"="salmon",
+                               "Discovery"="firebrick4")) +
+    theme_classic(base_size=24) +
+    theme(legend.position="right", 
+          legend.direction="vertical",
+          legend.title=element_text(size=32),
+          legend.text=element_text(size=24),
+          axis.text=element_text(size=64),
+          axis.title=element_text(size=72),
+          plot.title=element_text(size=64)) +
+    guides(fill=guide_legend(ncol=1,override.aes=list(shape=21), title.position="top"), shape=guide_legend(ncol=1,title.position="top"))
+
+# Add to list
+newList <- list(site_plt,
+                cond_plt,
+                study_plt)
+names(newList) <- c("normAbundancePPCA_colBySite_combValidDiscoData",
+                    "normAbundancePPCA_colByCondition_combValidDiscoData",
+                    "normAbundancePPCA_colByStudyCohort_combValidDiscoData")
+plotList <- append(plotList,
+                   newList)
+
+study_plt
+
+```
+
+### Save plots
+
+```{r}
+
+# Save as RDS
+saveRDS(plotList,
+        here::here(figDir, 
+                   "12_validationDataNormEDA_figs.rds"))
+
+```
+
+
+
+

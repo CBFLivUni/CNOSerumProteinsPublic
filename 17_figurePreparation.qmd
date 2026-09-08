@@ -1,0 +1,2535 @@
+---
+title: "Figure Preparation"
+author: "Euan McDonnell"
+format: html
+editor: source
+---
+
+# Code
+
+## Pre-amble
+
+### Run pre-amble script
+
+```{r}
+
+# Source metadata
+here::i_am("17_figurePreparation.qmd")
+source(here::here("utilities", "R", "codeModules", "boilerPlate", "loadParamsLibrariesFunctions.R"))
+
+# Source discovery study metadata
+source(here::here("utilities", "R", "codeModules", "data", "readMetadata.R"))
+
+# Source colours
+source(here::here("params", "colors.R"))
+
+# Adjust colours
+condStudyCols <- condCols
+names(condStudyCols) <- paste0("Discovery.", names(condStudyCols))
+lightCols <- lighten(condCols, 0.5)
+names(lightCols) <- paste0("Validation.", names(lightCols))
+condStudyCols <- c(condStudyCols, lightCols)
+
+# Source Eva's ML biomarker functions
+# source(here::here("utilities", "ExPeDiTe_publication", "ExpediteFunctions.R"))
+
+```
+
+### Read in plot list
+
+```{r}
+
+# List plots
+# allFigs <- list.files(here::here("results", runName, "figs"),
+#                       pattern="*.rds")
+
+# Load
+# plotList <- vector(mode="list",
+#                    length=length(allFigs))
+# for (i in seq_along(plotList)) {
+#   
+#   # Read in RDS
+#   plotList[[i]] <- readRDS(here::here("results", runName, "figs", allFigs[[i]]))
+#   
+# }
+# names(plotList) <- allFigs
+
+# # Save as RDS
+# plotList <- readRDS(here::here(figDir, 
+#                     "19_validationDataPredictionModelling_figs.rds"))
+ 
+```
+
+## Main
+
+### Primary figures
+
+#### Figure 2
+
+Candidates summaries.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`06_differentialAbundance_figs.rds` = readRDS(here::here("results", runName, "figs", "06_differentialAbundance_figs.rds")),
+                `10_finalModel_figs.rds` = readRDS(here::here("results", runName, "figs", "10_finalModel_figs.rds")))
+
+plotList$`10_finalModel_figs.rds`$PPCABimProtsCondSitePC12$layers
+
+removeGeom <- function(ggplot2_object, geom_type) {
+  # Delete layers that match the requested type.
+  layers <- lapply(ggplot2_object$layers, function(x) {
+    if (class(x$geom)[1] == geom_type) {
+      NULL
+    } else {
+      x
+    }
+  })
+  # Delete the unwanted layers.
+  layers <- layers[!sapply(layers, is.null)]
+  ggplot2_object$layers <- layers
+  ggplot2_object
+}
+
+# Combine
+fig2Plt1 <- ((plotList$`10_finalModel_figs.rds`$PPCABimProtsCondSitePC12 + labs(tag="C") +
+               ggtitle("Probabilistic PCA on\nBi-Modal Proteins") +
+               theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+                     plot.title=element_text(size=84),
+                     axis.text.y=element_text(size=56),
+                     axis.text.x=element_text(size=56),
+                     axis.title=element_text(size=84)) +
+               guides(fill=guide_legend(override.aes=list(size=20),
+                                        nrow=3))) +
+              (plotList$`10_finalModel_figs.rds`$PPCAGrpProtsCondSitePC12 + labs(tag="D") +
+               ggtitle("Probabilistic PCA on\nMulti-Modal Proteins") +
+               theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+                     plot.title=element_text(size=84),
+                     axis.text.y=element_text(size=56),
+                     axis.text.x=element_text(size=56),
+                     axis.title=element_text(size=84))) +
+               guides(fill=guide_legend(override.aes=list(size=20),
+                                        nrow=3)))
+fig2Plt2 <- (plotList$`06_differentialAbundance_figs.rds`$allProtsPPCA_colByCondSitePC12 + 
+               labs(tag="A",
+                    fill="CondSite") +
+               ggtitle("Probabilistic PCA on\nAll Proteins") +
+               theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+                     plot.title=element_text(size=84),
+                     axis.text.y=element_text(size=56),
+                     axis.text.x=element_text(size=56),
+                     axis.title=element_text(size=84)) +
+               scale_y_continuous(labels=function(x) sprintf("%.1f", x)) +
+               guides(fill=guide_legend(override.aes=list(size=20),
+                                        nrow=3)) +
+            geom_point(color="white",
+                       size=12) +
+            geom_point(mapping=aes(fill=CondSite),
+                       shape=21,
+                       alpha=0.85,
+                       size=12) +
+               scale_fill_manual(breaks=factor(c("CNO_Dresden", 
+                                                 "Crohn_Dresden",
+                                                 "Oncology_Dresden", 
+                                                 "Healthy_Liverpool",
+                                                 "Healthy_Vanderbilt",
+                                                 "InfOsteitis_Vanderbilt"),
+                                 levels=c("CNO_Dresden", 
+                                          "Crohn_Dresden",
+                                          "Oncology_Dresden", 
+                                          "Healthy_Liverpool",
+                                          "Healthy_Vanderbilt",
+                                          "InfOsteitis_Vanderbilt")),
+                                 labels=c("CNO (Dresden)", 
+                                          "Crohn (Dresden)",
+                                          "Oncology (Dresden)", 
+                                          "Healthy (Liverpool)",
+                                          "Healthy (Vanderbilt)",
+                                          "InfOsteitis (Vanderbilt)"),
+                                 values=condSiteCols) +
+                theme_classic(base_size=36) +
+               theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+                     legend.position="none",
+                     legend.title=element_text(size=88),
+                     axis.text.y=element_text(size=56),
+                     axis.text.x=element_text(size=56),
+                     legend.text=element_text(size=64),
+                     axis.title=element_text(size=96),
+                     plot.title=element_text(size=96))) +
+  (ggplot() + theme_void() + labs(tag="B") + theme(plot.tag = element_text(face = "bold", size = 100))) +
+             plot_layout(widths=c(1, 1))
+# figS9Plt3 <- (ggplot() + theme_void() + labs(tag="D") + theme(plot.tag = element_text(face = "bold", size = 100)))
+
+# Combine
+fig2Plt <- ((fig2Plt2) /
+           (fig2Plt1 + 
+            plot_layout(guides="collect") &
+            geom_point(color="white",
+                       size=12) &
+            geom_point(mapping=aes(fill=CondSite),
+                       shape=21,
+                       alpha=0.85,
+                       size=12) &
+               scale_fill_manual(breaks=factor(c("CNO_Dresden", 
+                                                 "Crohn_Dresden",
+                                                 "Oncology_Dresden", 
+                                                 "Healthy_Liverpool",
+                                                 "Healthy_Vanderbilt",
+                                                 "InfOsteitis_Vanderbilt"),
+                                 levels=c("CNO_Dresden", 
+                                          "Crohn_Dresden",
+                                          "Oncology_Dresden", 
+                                          "Healthy_Liverpool",
+                                          "Healthy_Vanderbilt",
+                                          "InfOsteitis_Vanderbilt")),
+                                 labels=c("CNO (Dresden)", 
+                                          "Crohn (Dresden)",
+                                          "Oncology (Dresden)", 
+                                          "Healthy (Liverpool)",
+                                          "Healthy (Vanderbilt)",
+                                          "InfOsteitis (Vanderbilt)"),
+                                 values=condSiteCols) &
+               labs(fill="Condition\nand Site") &
+               theme(legend.position="bottom", 
+                     legend.direction="horizontal",
+                     legend.title.position="left",
+                     legend.title=element_text(size=96),
+                     legend.text=element_text(size=76),
+                     axis.title=element_text(size=88),
+                     plot.title=element_text(size=96)))) &
+               guides(fill=guide_legend(override.aes=list(size=32),
+                                        nrow=3))
+
+# Visualise
+fig2Plt
+
+# Save
+ggsave(here::here(figDir,
+                  "fig2_finalCandidatePPCA.png"),
+       fig2Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "fig2_finalCandidatePPCA.pdf"),
+       fig2Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+# Remove to clear space
+rm(fig2Plt)
+rm(fig2Plt1)
+rm(fig2Plt2)
+rm(plotList)
+
+```
+
+#### Figure 3
+
+Candidates summaries.
+
+Non-imputed protein abundances so some NAs for some protein abundances in some samples.
+
+```{r, fig.height=44, fig.width=32}
+
+# Read in 
+plotList = list(`10_finalModel_figs.rds` = readRDS(here::here("results", runName, "figs", "10_finalModel_figs.rds")))
+
+# Change size
+# plotList$`10_finalModel_figs.rds`$selectProtsBim_abundanceBoxplots$layers[[2]]$aes_params$size <- 3.5
+# plotList$`10_finalModel_figs.rds`$selectProtsGrp_abundanceBoxplots$layers[[2]]$aes_params$size <- 3.5
+# plotList$`10_finalModel_figs.rds`$selectProtsBim_abundanceBoxplots$layers[[2]]$position$width <- 0
+# plotList$`10_finalModel_figs.rds`$selectProtsGrp_abundanceBoxplots$layers[[2]]$position$width <- 0
+# plotList$`10_finalModel_figs.rds`$selectProtsBim_abundanceBoxplots$layers[[2]]$position <- position_jitterdodge()
+# plotList$`10_finalModel_figs.rds`$selectProtsGrp_abundanceBoxplots$layers[[2]]$position <- position_jitterdodge()
+
+# CHange outlier shape
+plotList$`10_finalModel_figs.rds`$selectProtsBim_abundanceBoxplots$layers[[1]]$geom_params$outlier.shape <- NA
+plotList$`10_finalModel_figs.rds`$selectProtsGrp_abundanceBoxplots$layers[[1]]$geom_params$outlier.shape <- NA
+
+# Combine
+fig3Plt <- ((plotList$`10_finalModel_figs.rds`$selectProtsBim_abundanceBoxplots + 
+               labs(tag="A") + 
+               ggtitle("Bi-Modal Selected Proteins")) /
+            (plotList$`10_finalModel_figs.rds`$selectProtsGrp_abundanceBoxplots + 
+               labs(tag="B") + 
+               ggtitle("Multi-Modal Selected Proteins")) +
+                 plot_layout(heights=c(1, 2, 0.1),
+                             guides="collect") &
+                 geom_jitter(size=3.5,
+                             shape=21,
+                             show.legend=FALSE,
+                             mapping=aes(fill=CondSite),
+                             position=position_jitterdodge(),
+                             alpha=0.65,
+                             seed=1) &
+                  guides(fill=guide_legend(nrow=3))) +
+              plot_spacer() &
+                 labs(fill="Condition\nand Site",
+                      y=bquote(Log[2]( Abundance))) &
+               scale_fill_manual(breaks=factor(c("CNO_Dresden", 
+                                                 "Crohn_Dresden",
+                                                 "Healthy_Liverpool",
+                                                 "Healthy_Vanderbilt",
+                                                 "InfOsteitis_Vanderbilt",
+                                                 "Oncology_Dresden"),
+                                 levels=c("CNO_Dresden", 
+                                          "Crohn_Dresden",
+                                          "Healthy_Liverpool",
+                                          "Healthy_Vanderbilt",
+                                          "InfOsteitis_Vanderbilt",
+                                          "Oncology_Dresden")),
+                                 labels=c("CNO (Dresden)", 
+                                          "Crohn (Dresden)",
+                                          "Healthy (Liverpool)",
+                                          "Healthy (Vanderbilt)",
+                                          "InfOsteitis (Vanderbilt)",
+                                          "Oncology (Dresden)"),
+                                 values=condSiteCols) &
+                 theme(plot.tag = element_text(face = "bold",
+                                               size = 100),
+                       strip.background =element_rect(fill="white"),
+                       axis.title=element_text(size=88),
+                       plot.title=element_text(size=96),
+                       axis.text.y=element_text(size=44),
+                       # axis.title.x=element_text(size=88),
+                       # axis.title.y=element_text(size=88),
+                       legend.position="bottom",
+                       legend.direction="horizontal",
+                       legend.title.position="left",
+                       legend.text=element_text(size=76),
+                       legend.title=element_text(size=92),
+                       strip.text=element_text(size=52),
+                       legend.key.size = unit(9, "line")) &
+                 guides(fill=guide_legend(byrow=TRUE,
+                                          ncol=2))
+
+# View
+fig3Plt
+
+# Save
+ggsave(here::here(figDir,
+                  "fig3_finalCandidateSummaries.png"),
+       fig3Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "fig3_finalCandidateSummaries.pdf"),
+       fig3Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+# # Remove to clear space
+rm(fig3Plt)
+
+```
+
+#### Figure 4
+
+Model metric performances on the discovery cohort.
+
+Oncology missing in 1 split, so 4 NAs for Sensitivity/F1/Bal Acc/AUROC
+
+```{r, fig.height=40, fig.width=32}
+
+# Change size and alpha of points
+plotList$`10_finalModel_figs.rds`$biModalProtsMetrics$layers[[2]]$aes_params$size <- 10
+plotList$`10_finalModel_figs.rds`$biModalProtsMetrics$layers[[2]]$aes_params$alpha <- 0.675
+plotList$`10_finalModel_figs.rds`$biModalMultiGrpProtsMetrics$layers[[2]]$aes_params$size <- 10
+plotList$`10_finalModel_figs.rds`$biModalMultiGrpProtsMetrics$layers[[2]]$aes_params$alpha <- 0.675
+plotList$`10_finalModel_figs.rds`$multiModelProtsMetrics$layers[[2]]$aes_params$size <- 8
+plotList$`10_finalModel_figs.rds`$multiModelProtsMetrics$layers[[2]]$aes_params$alpha <- 0.675
+
+# --- create a common theme to reduce grob-width differences ---
+common_theme <- theme(
+  strip.text = element_text(size = 52),
+  axis.text.x  = element_text(size = 64),
+  plot.margin = margin(5, 5, 5, 5)
+)
+
+# --- build each sub-plot separately for clarity ---
+pA <- plotList$`10_finalModel_figs.rds`$biModalProtsMetrics +
+  facet_wrap(~ variable, ncol = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "A", title = "Bi-Modal") +
+  common_theme +
+  theme(axis.text.x = element_text(size=72),
+        axis.text.y = element_text(size = 64),
+        axis.title.y = element_text(size = 100,
+                                        angle=90),
+        legend.position="none") +
+  # hide fill legend here so only one plot supplies it to be collected
+  guides(color = "none")
+
+pB <- plotList$`10_finalModel_figs.rds`$biModalMultiGrpProtsMetrics +
+  facet_wrap(~ variable, ncol = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "B", 
+       title = "Bi-Modal\n(Whole Panel)") +
+  common_theme +
+  # remove redundant left axis elements to avoid double-reserving left space
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_text(size = 72),
+        legend.position="none")
+
+# This plot will supply the legend (so don't hide its legend)
+pC <- plotList$`10_finalModel_figs.rds`$multiModelProtsMetrics +
+  facet_wrap(~ variable, ncol = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "C") +
+  common_theme +
+  # remove left y-axis items so they don't take extra space
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = c(-0.275, -0.1),
+        legend.direction="horizontal",
+        axis.text.x = element_text(size = 72, 
+                                   angle = 90, 
+                                   hjust = 1, 
+                                   vjust = 0.5))
+
+# bottom row plot (held-out data)
+pD <- plotList$`10_finalModel_figs.rds`$multiModelProtsMetrics_heldOutData +
+  geom_text(mapping = aes(y = value - 0.05, label = round(value, 2)),
+            color = "white", hjust = 1, angle = 90, size = 24) +
+  facet_wrap(~ variable, nrow = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "D") +
+  common_theme +
+  theme(legend.direction = "horizontal",
+        legend.position = "bottom",
+        legend.key.size = unit(6, "line"),
+        legend.title = element_text(size = 88),
+        legend.text = element_text(size = 80),
+        axis.text.x = element_blank())
+
+# --- Combine with patchwork ---
+# Important notes applied:
+# - only pC provides the legend (show.legend = TRUE); guides = "collect" will therefore
+#   collect a single, consistent legend and place it where we request
+# - widths are set to favour the right-hand multi-panel plot, but because we've
+#   removed duplicated left-axis grob widths and standardized theme settings,
+#   columns will be much more proportional
+fig4Plt <- (
+  (pA + pB + pC) +
+    plot_layout(widths = c(1, 1, 1.5)) &
+    labs(color="Condition") &
+    theme(
+      legend.title = element_text(size = 88),
+      legend.text = element_text(size = 80),
+      axis.text.x = element_blank()) &
+    guides(color=guide_legend(override.aes=list(size=28),
+                              nrow=2,
+                              byrow=TRUE))
+) /
+  plot_spacer() /
+  (pD + 
+  theme(axis.title.y = element_text(size = 100,
+                                    angle=90),
+        axis.text.y  = element_text(size = 64))) +
+  plot_layout(heights = c(1, 0.1, 0.75), axes = "collect_y", axis_titles = "collect_y") &
+  labs(fill = "Condition") &
+  scale_y_continuous(breaks = c(0, 0.5, 1), limits = c(-0.05, 1.05)) &
+  theme(
+    plot.tag = element_text(face = "bold", size = 100),
+    plot.title = element_text(size = 88),
+    strip.text = element_text(size = 84),
+    axis.title.x = element_blank(),
+  ) &
+  guides(fill=guide_legend(nrow=2,
+                           byrow = TRUE))
+
+fig4Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "fig4_discoveryModelPerformances.png"),
+       fig4Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "fig4_discoveryModelPerformances.pdf"),
+       fig4Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+# Remove to clear space
+rm(pA)
+rm(pB)
+rm(pC)
+rm(pD)
+rm(fig4Plt)
+# rm(plotList)
+
+```
+
+#### Figure 5
+
+Plot protein abundances by validation and discovery.
+
+Could measure variance between validation and discovery, per group.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`15_validationDataPredictionModelling_figs_bPCA.rds` = readRDS(here::here("results", runName, "figs", "15_validationDataPredictionModelling_figs_bPCA.rds")))
+
+# Adjust colours
+condStudyCols <- condCols
+names(condStudyCols) <- paste0("Discovery.", names(condStudyCols))
+lightCols <- lighten(condCols, 0.5)
+names(lightCols) <- paste0("Validation.", names(lightCols))
+condStudyCols <- c(condStudyCols, lightCols)
+
+# Order
+condStudyCols <- condStudyCols[c("Discovery.CNO", 
+                                 "Validation.CNO",
+                                 "Discovery.Healthy",
+                                 "Discovery.Crohn", 
+                                 "Discovery.Oncology", 
+                                 "Discovery.InfOsteitis",
+                                 "Validation.Healthy",
+                                 "Validation.Crohn",
+                                 "Validation.Oncology",
+                                 "Validation.InfOsteitis")]
+
+# Combine
+fig5Plt <- ( (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$biModalProts_abundanceBoxplots_validVsDisco_bPCA + labs(tag="A") + ggtitle("Bi-Modal Selected Proteins") +
+               labs(y="Scaled Abundance") +
+               theme(strip.text=element_text(size=56),
+                     legend.position="none")) /
+             (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$multiGroupProts_abundanceBoxplots_validVsDisco_bPCA + labs(tag="B") + ggtitle("Multi-Modal Selected Proteins") +
+               labs(y="Scaled Abundance") +
+               theme(strip.text=element_text(size=56),
+                     legend.position="bottom") +
+               guides(fill=guide_legend(override.aes=list(size=32),
+                                        nrow=5)))) +
+  plot_layout(heights=c(1, 1.5),
+              nrow=2) &
+  labs(fill="Condition\nby Cohort") &
+  scale_y_continuous(labels = scales::label_number(accuracy = 1)) & 
+  geom_point(mapping=aes(fill=interaction(Data_Group, 
+                                          Condition)),
+             position=position_jitterdodge(),
+             show.legend=FALSE,
+             alpha=0.35,
+             size=4) &
+  scale_fill_manual(breaks=factor(c("Discovery.CNO", 
+                                    "Discovery.Crohn", 
+                                    "Discovery.Healthy", 
+                                    "Discovery.InfOsteitis",
+                                    "Discovery.Oncology",
+                                    "Validation.CNO",
+                                    "Validation.Crohn",
+                                    "Validation.Healthy",
+                                    "Validation.InfOsteitis",
+                                    "Validation.Oncology"),
+                           levels=c("Discovery.CNO", 
+                                    "Discovery.Crohn", 
+                                    "Discovery.Healthy",
+                                    "Discovery.InfOsteitis",
+                                    "Discovery.Oncology", 
+                                    "Validation.CNO",
+                                    "Validation.Crohn",
+                                    "Validation.Healthy",
+                                    "Validation.InfOsteitis",
+                                    "Validation.Oncology")),
+                           labels=c("CNO (Discovery)",
+                                    "Crohn (Discovery)",
+                                    "Healthy (Discovery)",
+                                    "InfOsteitis (Discovery)",
+                                    "Oncology (Discovery)",
+                                    "CNO (Validation)",
+                                    "Crohn (Validation)",
+                                    "Healthy (Validation)",
+                                    "InfOsteitis (Validation)",
+                                    "Oncology (Validation)"),
+                      values=condStudyCols) &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        strip.text=element_text(size=64),
+        legend.text=element_text(size=72),
+        legend.title=element_text(size=84),
+        legend.title.position="left",
+        plot.title=element_text(size=96),
+        axis.text.y=element_text(size=44),
+        axis.title.y=element_text(size=88),
+        axis.title.x=element_text(size=88))
+
+fig5Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "fig5_candidateAbundance_discoveryAndValidation.png"),
+       fig5Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "fig5_candidateAbundance_discoveryAndValidation.pdf"),
+       fig5Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+# Remove to clear space
+rm(fig5Plt)
+rm(plotList)
+
+```
+
+#### Figure 6
+
+Comparison between discovery and validation differential abundance analysis.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`14_validationDataDiffAbundance_figs.rds` = readRDS(here::here("results", runName, "figs", "14_validationDataDiffAbundance_figs.rds")))
+
+# Adjust asterisks
+plotList$`14_validationDataDiffAbundance_figs.rds`$diffAbundanceComparison_orthoganolDistance$layers[[2]]$aes_params$size <- 30
+plotList$`14_validationDataDiffAbundance_figs.rds`$diffAbundanceComparison_orthoganolDistance$layers[[2]]$aes_params$hjust <- -0.45
+
+fig6Plt2 <- (plotList$`14_validationDataDiffAbundance_figs.rds`$diffAbundanceComparison_orthoganolDistance +
+              geom_vline(xintercept=0,
+                         color="darkgrey") +
+              labs(y="Candidate Protein",
+                   x="Scaled Distance",
+                   pattern="Consistent LogFC") +
+                   scale_x_continuous(breaks = c(0, 2, 4),
+                                      limits  = c(0, 4.75),
+                                      labels  = c(0, 2, 4)) +
+              theme(axis.text.x=element_text(size=56),
+                    legend.key=element_rect(colour="white",
+                                            size=5)))
+
+# Combine
+fig6Plt <- fig6Plt2 +
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        legend.position = "bottom",
+        legend.direction="horizontal",
+        strip.background.x=element_blank(),
+        strip.text.y=element_text(size=92),
+        strip.text.x=element_text(size=80),
+        axis.title.y=element_text(size=108),
+        axis.title.x=element_text(size=108),
+        axis.text.x=element_text(size=88),
+        axis.text.y=element_text(size=68),
+        legend.text=element_text(size=88),
+        legend.title=element_text(size=100),
+        legend.title.position="top",
+        panel.spacing.y = unit(2, "lines"),
+        legend.key.size = unit(6, "line")) +
+               scale_fill_manual(values=condCols,
+                                 breaks=c(factor(c("CNO", 
+                                                "Crohn", 
+                                                "Healthy", 
+                                                "InfOsteitis",
+                                                "Oncology"),
+                                               levels=c("CNO", 
+                                                        "Crohn", 
+                                                        "Healthy", 
+                                                        "InfOsteitis",
+                                                        "Oncology")))) +
+        guides(fill=guide_legend(override.aes=list(size=30,
+                                                   pattern="none"),
+                                 nrow=2,
+                                 byrow=TRUE),
+               pattern=guide_legend(override.aes=list(size=30,
+                                                      shape=c(22, 21)),
+                                    nrow=2),
+               alpha="none")
+fig6Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "fig6_differentialAbundance_discoveryVsValidation.png"),
+       fig6Plt,
+       width=10000,
+       height=10000,
+       units="px")
+ggsave(here::here(figDir,
+                  "fig6_differentialAbundance_discoveryVsValidation.pdf"),
+       fig6Plt,
+       width=10000,
+       height=10000,
+       device="pdf",
+       units="px")
+
+# Remove to clear space
+rm(fig6Plt1)
+rm(fig6Plt2)
+rm(fig6Plt)
+rm(plotList)
+gc()
+
+```
+
+#### Figure 7
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`15_validationDataPredictionModelling_figs_bPCA.rds` = readRDS(here::here("results", runName, "figs", "15_validationDataPredictionModelling_figs_bPCA.rds")))
+
+# Adjust size
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_validData_bPCA$layers[[2]]$aes_params <- c(hjust=-100,
+                                                                                                                  plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_validData_bPCA$layers[[2]]$aes_params)
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_validData_bPCA$layers[[2]]$aes_params$colour <- "white"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_validData_bPCA$layers[[2]]$aes_params$size <- NA
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_multiGroup_bPCA$layers[[2]]$aes_params$size <- 12
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_multiGroup_bPCA$layers <- plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_multiGroup_bPCA$layers[-3]
+
+# Plot
+fig7Plt <- ((plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_validData_bPCA + labs(tag="A") + 
+               scale_y_continuous(breaks=c(0, 0.25, 0.5, 0.75, 1),
+                                  limits=c(-0.1, 1)) +
+               geom_hline(yintercept=0,
+                          color="black") +
+               geom_text(mapping=aes(label=ifelse(round(value, 2) <= 0.3, NA, round(value, 2)),
+                                     x=variable,
+                                     y=value,
+                                     ),
+                         position=position_dodge(width=0.9),
+                         hjust=1.075,
+                         color="white",
+                         angle=90,
+                         size=20) +
+               geom_text(mapping=aes(label=ifelse(round(value, 2) > 0.3, NA, round(value, 2)),
+                                     x=variable,
+                                     y=value,
+                                     ),
+                         position=position_dodge(width=0.9),
+                         hjust=-0.1,
+                         color="black",
+                         angle=90,
+                         size=20) +
+               scale_color_manual(values=c("X"="white",
+                                           "Y"="black")) +
+               scale_fill_manual(values=condCols,
+                                 breaks=c(factor(c("CNO", 
+                                                "Crohn", 
+                                                "Healthy", 
+                                                "InfOsteitis",
+                                                "Oncology"),
+                                               levels=c("CNO", 
+                                                        "Crohn", 
+                                                        "Healthy", 
+                                                        "InfOsteitis",
+                                                        "Oncology")))) +
+               facet_wrap(~ variable,
+                          ncol=3,
+                          scale="free_x") +
+               geom_hline(yintercept=0,
+                          color="black",
+                          linewidth=2) +
+               scale_y_continuous(limits=c(-0.1, 1.05)) +
+               theme(strip.text=element_text(size=48),
+                     legend.title.position="left",
+                     legend.key.size = unit(7.5, "line")) +
+               guides(fill=guide_legend(override.aes=list(size=32),
+                                                          nrow=2,
+                                                          byrow=TRUE))) /
+            (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_multiGroup_bPCA + labs(tag="B",
+                                                        x="Mis-Predicted") +
+               theme(strip.text=element_text(size=64),
+                     axis.text.x=element_text(size=72),
+                     legend.title.position="top",
+                     legend.box="horizontal", 
+                     legend.margin=margin()) +
+               guides(fill=guide_legend(override.aes=list(size=36, 
+                                                          shape=21),
+                                                          nrow=2,
+                                        byrow=TRUE),
+                      shape=guide_legend(override.aes=list(size=36),
+                                                           nrow=2),
+                      color="none")) +
+             plot_layout(heights=c(1.75, 1))) &
+             labs(fill="Condition") &
+             theme(plot.tag = element_text(face = "bold", 
+                                           size = 100),
+                   strip.text=element_text(size=84),
+                   plot.title=element_text(size=64),
+                   axis.text.y=element_text(size=64),
+                   axis.title.y=element_text(size=100),
+                   axis.title.x=element_text(size=100),
+                   legend.position="bottom",
+                   legend.title=element_text(size=88),
+                   legend.text=element_text(size=80))
+
+fig7Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "fig7_multiModalModelPerformance_onValidation.png"),
+       fig7Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "fig7_multiModalModelPerformance_onValidation.pdf"),
+       fig7Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+rm(fig7Plt)
+# rm(plotList)
+
+```
+
+#### Figure 8
+
+```{r}
+
+library(ggplot2)
+library(ggforce)
+library(sf)
+
+# --- your sets ---
+set1 <- c("GSN", "LRG1", "CRISP3", "PGK1", "CAT",
+          "ICAM1", "CD14",
+          "CRP", "FCN2", "FCN3",
+          "F2", "C5", "C4A", "C3", "ALDOA")
+
+set2 <- c("MST1", "TNC", "SERPINA10",
+          "ICAM1", "CD14",
+          "ITIH3",
+          "F2", "C5", "C4A", "C3", "ALDOA")
+
+set3 <- c("SERPINA5",
+          "CRP", "FCN2", "FCN3",
+          "ITIH3",
+          "F2", "C5", "C4A", "C3", "ALDOA")
+
+n1_only <- setdiff(set1, union(set2, set3))
+n2_only <- setdiff(set2, union(set1, set3))
+n3_only <- setdiff(set3, union(set1, set2))
+n12     <- setdiff(intersect(set1, set2), set3)
+n23     <- setdiff(intersect(set2, set3), set1)
+n13     <- setdiff(intersect(set1, set3), set2)
+n123    <- intersect(intersect(set1, set2), set3)
+
+fmt <- function(x) paste(sort(x), collapse = "\n")
+
+# Increase the spread slightly to shrink the center (triple) overlap
+# faster than the pairwise overlaps
+circle_params <- data.frame(
+  x0 = c(-1.15, 1.15, 0),     # was -0.55, 0.55 — push circles apart a bit
+  y0 = c(0.9, 0.9, -0.5),     # was 0.35, 0.35, -0.7
+  r  = 2.2,
+  category = c("Immune", "Signalling", "Coagulation")
+)
+
+make_circle_sf <- function(x0, y0, r, n = 200) {
+  st_buffer(st_point(c(x0, y0)), dist = r, nQuadSegs = n / 4)
+}
+
+circ1 <- make_circle_sf(circle_params$x0[1], circle_params$y0[1], circle_params$r[1])
+circ2 <- make_circle_sf(circle_params$x0[2], circle_params$y0[2], circle_params$r[2])
+circ3 <- make_circle_sf(circle_params$x0[3], circle_params$y0[3], circle_params$r[3])
+
+region_geom <- list(
+  n1_only = st_difference(circ1, st_union(circ2, circ3)),
+  n2_only = st_difference(circ2, st_union(circ1, circ3)),
+  n3_only = st_difference(circ3, st_union(circ1, circ2)),
+  n12     = st_difference(st_intersection(circ1, circ2), circ3),
+  n23     = st_difference(st_intersection(circ2, circ3), circ1),
+  n13     = st_difference(st_intersection(circ1, circ3), circ2),
+  n123    = st_intersection(st_intersection(circ1, circ2), circ3)
+)
+
+# --- safe centroid extraction: returns c(NA, NA) if geometry is empty ---
+get_centroid_xy <- function(geom) {
+  if (is.null(geom) || length(geom) == 0 || st_is_empty(geom)) {
+    return(c(x = NA_real_, y = NA_real_))
+  }
+  ctr <- st_centroid(geom)
+  xy  <- st_coordinates(ctr)
+  c(x = xy[1, 1], y = xy[1, 2])
+}
+
+coords_list <- lapply(region_geom, get_centroid_xy)
+coords <- do.call(rbind, coords_list)
+
+# check for any empty regions before proceeding
+if (any(is.na(coords))) {
+  empty_regions <- names(region_geom)[apply(coords, 1, function(r) any(is.na(r)))]
+  warning("These regions came back empty (circles may not overlap enough / too much): ",
+          paste(empty_regions, collapse = ", "))
+}
+
+labels <- data.frame(
+  x = coords[, "x.X"],
+  y = coords[, "y.Y"],
+  label = c(fmt(n1_only), fmt(n2_only), fmt(n3_only),
+            fmt(n12), fmt(n23), fmt(n13), fmt(n123))
+)
+
+cat_labels <- data.frame(
+  x = c(-1.6, 1.6, 0),
+  y = c(2.5, 2.5, -3.1),
+  label = c("Immune", "Signalling", "Coagulation")
+)
+
+p1 <- ggplot() +
+  geom_circle(data = circle_params,
+              aes(x0 = x0, 
+                  y0 = y0, 
+                  r = r, 
+                  fill = category),
+              alpha = 0.4, 
+              color = NA) +
+  geom_circle(data = circle_params,
+              aes(x0 = x0, 
+                  y0 = y0, 
+                  r = r),
+              fill = NA, 
+              color = "white", 
+              linewidth = 4) +
+  geom_text(data = labels, 
+            aes(x = x, 
+                y = y, 
+                label = label),
+            size = 28, 
+            lineheight = 0.85, 
+            na.rm = TRUE) +
+  geom_text(data = cat_labels, 
+            aes(x = ifelse(label == "Coagulation",
+                           x,
+                           x * 1.65), 
+                y = ifelse(label == "Coagulation",
+                           y,
+                           y * 1.3), 
+                label = label),
+            size = 40, 
+            fontface = "bold") +
+  scale_fill_manual(values = c("red", "blue", "green")) +
+  coord_fixed(
+    clip = "off"
+  ) +
+  theme_void() +
+  theme(legend.position = "none") +
+  theme(
+    plot.title = element_text(
+      size = 128,
+      face = "bold",
+      hjust = 0,
+      margin = margin(b = 20, l = -200)   # negative left margin pulls title further left
+    ),
+    plot.background  = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA)
+  )
+
+# --- save ---
+ggsave(
+  filename = here::here(resDir, "figs",
+                         "fig8_selectedProteins_functionalCategories_vennDiagram.png"),
+  plot = p1 + theme(plot.margin = margin(t = 0, r = 0, b = 0, l = 120)),
+  height = 10000, width = 10000, units = "px", dpi = 300, limitsize=FALSE,
+  bg = "white"
+)
+
+# --- save ---
+ggsave(
+  filename = here::here(resDir, "figs",
+                         "fig8_selectedProteins_functionalCategories_vennDiagram.pdf"),
+  plot = p1 + theme(plot.margin = margin(t = 0, r = 0, b = 0, l = 120)),
+  height = 10000, width = 10000, units = "px", dpi = 300, limitsize=FALSE, device="pdf",
+  bg = "white"
+)
+
+```
+
+### Supplementary
+
+#### Figure S1
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in
+plotList = list(`06_differentialAbundance_figs.rds` = readRDS(here::here("results", runName, "figs", "06_differentialAbundance_figs.rds")),
+                `11_validationDataProcessQC_figs.rds` = readRDS(here::here("results", runName, "figs", "11_validationDataProcessQC_figs.rds")))
+
+# Combine
+figS1Plt1 <- (plotList$`06_differentialAbundance_figs.rds`$conditionGroupNumbers_trainData + labs(tag="A", title="Discovery") +
+                geom_text(aes(label=ifelse(value > 0,
+                                           value,
+                                           NA),
+                              x=Site,
+                              y=value),
+                          color="white",
+                          position = position_stack(vjust = .5),
+                          size=20,
+                          show.legend=FALSE) +
+                scale_color_manual(values=c("black",
+                                            "white"))) +
+             (plotList$`11_validationDataProcessQC_figs.rds`$sampleConditionGroupNumbers_validData + labs(tag="B", title="Validation") +
+                geom_text(aes(label=ifelse(value > 0,
+                                           value,
+                                           NA),
+                              vjust=ifelse(value == 1,
+                                           -0.65,
+                                           0),
+                              x=Site,
+                              y=value,
+                              color=ifelse(value == 1, "black", "white")),
+                          position = position_stack(vjust = .5),
+                          size=20,
+                          show.legend=FALSE) +
+                scale_color_manual(values=c("black",
+                                            "white"))) +
+             (plotList$`06_differentialAbundance_figs.rds`$conditionGroupNumbers_trainData_justSamplesWithDate + labs(tag="C", title="Discovery\nwith Date") +
+                geom_text(aes(label=ifelse(value > 0,
+                                           value,
+                                           NA),
+                              vjust=ifelse(value == 4,
+                                           -1,
+                                           0),
+                              x=Site,
+                              y=value,
+                              color=ifelse(value == 4, "black", "white")),
+                          position = position_stack(vjust = .5),
+                          size=20,
+                          show.legend=FALSE) +
+                scale_color_manual(values=c("black",
+                                            "white"))) +
+              plot_layout(guides="collect",
+                          axes="collect") &
+              theme(plot.tag = element_text(face = "bold",
+                                           size = 100),
+                   plot.title=element_text(size=80),
+                   axis.text.x=element_text(size=52,
+                                            angle=90,
+                                            hjust=1,
+                                            vjust=0.5),
+                   axis.text.y=element_text(size=64),
+                   axis.title.y=element_text(size=72),
+                   axis.title.x=element_text(size=72),
+                   strip.text=element_text(size=64),
+                   legend.text=element_text(size=64),
+                   legend.title=element_text(size=72),
+                   legend.position="bottom",
+                   legend.key.size = unit(6.5, "line"),
+                   legend.title.position="left",
+                   legend.direction="horizontal") &
+  guides(fill=guide_legend(override.aes=list(size=20,
+                                             nrow=2)))
+figS1Plt2 <- plotList$`06_differentialAbundance_figs.rds`$sampleDateDistribution + labs(tag="D") + 
+               theme(plot.tag = element_text(face = "bold",
+                                             size = 100),
+                     plot.title=element_text(size=80),
+                     axis.text.x=element_text(size=56),
+                     axis.text.y=element_text(size=64),
+                     axis.title.y=element_text(size=72),
+                     axis.title.x=element_text(size=72),
+                     strip.text=element_text(size=64),
+                     legend.text=element_text(size=64),
+                     legend.title=element_text(size=72),
+                     legend.position="bottom",
+                     legend.title.position="left",
+                     legend.direction="horizontal") &
+  guides(fill=guide_legend(override.aes=list(size=28)))
+
+# Plot
+figS1Plt1[[1]] <- figS1Plt1[[1]] + theme(legend.position="none")
+figS1Plt1[[3]] <- figS1Plt1[[3]] + theme(legend.position="none")
+figS1Plt <- ( figS1Plt1 + theme(axis.text.x=element_text(size=52,
+                                                         angle=90,
+                                                         hjust=1,
+                                                         vjust=0.5)) +
+                          guides(fill=guide_legend(override.aes=list(size=20,
+                                                                     nrow=2))) ) / 
+              figS1Plt2
+figS1Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS1_conditionSiteGroupDistributions.png"),
+       figS1Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS1_conditionSiteGroupDistributions.pdf"),
+       figS1Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+rm(figS1Plt1)
+rm(figS1Plt2)
+rm(figS1Plt3)
+rm(figS1Plt)
+rm(plotList)
+
+```
+
+#### Figure S2
+
+```{r, fig.height=20, fig.width=32}
+
+# Read in
+plotList = list(`02_dataProcessQC_figs.rds` = readRDS(here::here("results", runName, "figs", "02_dataProcessQC_figs.rds")),
+                `03_dataNormalisation_figs.rds` = readRDS(here::here("results", runName, "figs", "03_dataNormalisation_figs.rds")))
+
+# Change text size
+plotList$`02_dataProcessQC_figs.rds`$NProtsAllProts$layers[[3]]$aes_params$size <- 20
+plotList$`02_dataProcessQC_figs.rds`$NProtsSerumQCProts$layers[[3]]$aes_params$size <- 20
+plotList$`03_dataNormalisation_figs.rds`$sampleAbundDistribution_colByCondition_raw$layers[[1]]$aes_params$linewidth <- 0.5
+plotList$`03_dataNormalisation_figs.rds`$sampleAbundDistribution_colByCondition_raw$layers[[1]]$aes_params$size <- 2
+plotList$`03_dataNormalisation_figs.rds`$sampleAbundDistribution_colByCondition_cyclicLoessNorm$layers[[1]]$aes_params$linewidth <- 0.5
+plotList$`03_dataNormalisation_figs.rds`$sampleAbundDistribution_colByCondition_cyclicLoessNorm$layers[[1]]$aes_params$size <- 2
+
+# Combine
+figS2Plt1 <- ((plotList$`02_dataProcessQC_figs.rds`$NProtsAllProts + labs(tag="A") + 
+                ggtitle("All Proteins") + ylab("Number of\nRetained Proteins") +
+               scale_x_discrete(labels=c("UnFilt", "25%", "20%", "15%", "10%", "5%"))) +
+             (plotList$`02_dataProcessQC_figs.rds`$NProtsSerumQCProts + labs(tag="B")) + 
+               ggtitle("Serum QC Proteins") + ylab("Number of\nRetained Proteins") +
+               scale_x_discrete(labels=c("UnFilt", "25%", "20%", "15%", "10%", "5%"))) +
+             plot_layout(axes="collect",
+                         axis_titles="collect") &
+             labs(x="Allowed Percentage\nof Missing Values") &
+             theme(plot.tag = element_text(face = "bold",
+                                           size = 100),
+                   plot.title=element_text(size=84),
+                   axis.text.x=element_text(size=72,
+                                            angle=90,
+                                            vjust=0.5,
+                                            hjust=1),
+                   axis.text.y=element_text(size=64),
+                   axis.title.y=element_text(size=84),
+                   axis.title.x=element_text(size=72),
+                   strip.text=element_text(size=64),
+                   legend.text=element_text(size=48),
+                   legend.title=element_text(size=64),
+                   legend.position="none")
+figS2Plt2 <- ((plotList$`03_dataNormalisation_figs.rds`$sampleAbundDistribution_colByCondition_raw + labs(tag="C",
+                                                                                                         x="Discovery Samples",
+                                                                                                         y=bquote(atop(Log[2], (Abundance)))) +
+                ggtitle("Un-Normalised")) +
+             (plotList$`03_dataNormalisation_figs.rds`$sampleAbundDistribution_colByCondition_cyclicLoessNorm + labs(tag="D",
+                                                                                                                     x="Discovery Samples",
+                                                                                                                     y=bquote(atop(Log[2], (Abundance)))) +
+                ggtitle("Cyclic LOESS-\nNormalised")) &
+               theme(panel.grid.major = element_blank(),
+                     panel.grid.minor = element_blank()) &
+                scale_fill_manual(values=condCols,
+                                  breaks=c(factor(c("CNO", 
+                                                 "Crohn", 
+                                                 "Healthy", 
+                                                 "InfOsteitis",
+                                                 "Oncology"),
+                                                levels=c("CNO", 
+                                                         "Crohn", 
+                                                         "Healthy", 
+                                                         "InfOsteitis",
+                                                         "Oncology"))))) +
+                plot_layout(guides="collect") &
+                theme(plot.tag = element_text(face = "bold", 
+                                              size = 100),
+                      plot.title=element_text(size=72),
+                      axis.text.y=element_text(size=64),
+                      axis.title.y=element_text(size=84),
+                      axis.title.x=element_text(size=72),
+                      legend.text=element_text(size=72),
+                      legend.title=element_text(size=84),
+                      legend.title.position="left",
+                      legend.position="bottom",
+                      legend.direction="horizontal",
+                      legend.key.size = unit(9, "line")) &
+                guides(fill=guide_legend(nrow=2,
+                                         byrow=TRUE))
+
+
+# Plot
+figS2Plt <- figS2Plt1 / figS2Plt2
+figS2Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS2_discoveryData_missingValueQC.png"),
+       figS2Plt,
+       width=10000,
+       height=11000,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS2_discoveryData_missingValueQC.pdf"),
+       figS2Plt,
+       width=10000,
+       height=11000,
+       device="pdf",
+       units="px")
+
+rm(plotList)
+rm(figS2Plt)
+
+```
+
+#### Figure S3
+
+```{r, fig.height=28, fig.width=32}
+
+# Read in 
+plotList = list(`02_dataProcessQC_figs.rds` = readRDS(here::here("results", runName, "figs", "02_dataProcessQC_figs.rds")))
+
+# Combine
+figS3Plt1 <- ((plotList$`02_dataProcessQC_figs.rds`$UnFiltProtAbundanceSerumQC + labs(tag="A",
+                                                                                      x="Serum QC") + ggtitle("All Proteins") +
+                 theme(axis.text.y=element_text(size=88))) +
+                
+              (plotList$`02_dataProcessQC_figs.rds`$UnFiltProtAbundanceInstrQC + labs(tag="B",
+                                                                                      x="Instrument QC") + ggtitle("All Proteins") +
+                 theme(axis.text.y=element_text(size=88)))) +
+  
+              plot_layout(axis_titles="collect_y")
+
+figS3Plt2 <- ((plotList$`02_dataProcessQC_figs.rds`$SerumQCFiltProtAbundanceSerumQC + labs(tag="C",
+                                                                                            x="Serum QC") + ggtitle("Serum QC Proteins") +
+                  theme(axis.text.y=element_blank())) +
+              (plotList$`02_dataProcessQC_figs.rds`$SerumQCFiltProtAbundanceInstrQC + labs(tag="D",
+                                                                                                        x="Instrument QC",
+                                                                                                        y="Log2 Protein\nAbundance") + ggtitle("Serum QC Proteins") +
+                              theme(axis.text.y=element_blank()))) +
+              
+              plot_layout(axis_titles="collect_y")
+
+# Plot
+figS3Plt <- figS3Plt1 / figS3Plt2 & 
+  theme(plot.tag = element_text(face = "bold",
+                                size = 100),
+                    plot.title=element_text(size=96),
+                    strip.text=element_text(size=88),
+                    axis.text.x=element_text(size=64,
+                                             angle=90,
+                                             hjust=1,
+                                             vjust=0.5),
+                    axis.title=element_text(size=100))
+
+# Plot
+figS3Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS3_discoveryData_qcSampleDistributions.png"),
+       figS3Plt,
+       width=10000,
+       height=10000,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS3_discoveryData_qcSampleDistributions.pdf"),
+       figS3Plt,
+       width=10000,
+       height=10000,
+       device="pdf",
+       units="px")
+
+rm(plotList)
+rm(figS3Plt)
+rm(figS3Plt1)
+rm(figS3Plt2)
+
+```
+
+
+#### Figure S4
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`06_differentialAbundance_figs.rds` = readRDS(here::here("results", runName, "figs", "06_differentialAbundance_figs.rds")))
+
+# Combine
+figS4Plt1 <- ((plotList$`06_differentialAbundance_figs.rds`$sigDresdenProtsPPCA_colByCondSitePC12 + labs(tag="B") +
+               ggtitle("PPCA on Dresden-Only\nDifferentially Abundant Proteins") +
+               scale_fill_manual(breaks=factor(c("CNO_Dresden", 
+                                                 "Crohn_Dresden",
+                                                 "Oncology_Dresden", 
+                                                 "Healthy_Liverpool",
+                                                 "Healthy_Vanderbilt",
+                                                 "InfOsteitis_Vanderbilt"),
+                                 levels=c("CNO_Dresden", 
+                                          "Crohn_Dresden",
+                                          "Oncology_Dresden", 
+                                          "Healthy_Liverpool",
+                                          "Healthy_Vanderbilt",
+                                          "InfOsteitis_Vanderbilt")),
+                                 labels=c("CNO (Dresden)", 
+                                          "Crohn (Dresden)",
+                                          "Oncology (Dresden)", 
+                                          "Healthy (Liverpool)",
+                                          "Healthy (Vanderbilt)",
+                                          "InfOsteitis (Vanderbilt)"),
+                                 values=condSiteCols) +
+               theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+                     plot.title=element_text(size=64),
+                     axis.text.y=element_text(size=56),
+                     axis.title=element_text(size=72),
+                     legend.text=element_text(size=60),
+                     legend.title=element_text(size=68),
+                     legend.position="bottom",
+                     legend.direction="horizontal",
+                     legend.title.position="top") +
+               labs(fill="Condition\nAnd Site") +
+               guides(fill=guide_legend(override.aes=list(size=20),
+                                        nrow=3))) +
+              (plotList$`06_differentialAbundance_figs.rds`$sigDresdenProtsPPCA_colByPlate + labs(tag="C") +
+               ggtitle("PPCA on Dresden-Only\nDifferentially Abundant Proteins") +
+               scale_fill_manual(labels=c("Plate 1",
+                                          "Plate 2",
+                                          "Plate 3"),
+                                 values=plateCols) +
+               theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+                     plot.title=element_text(size=64),
+                     axis.text.y=element_text(size=56),
+                     axis.title=element_text(size=72),
+                     legend.text=element_text(size=72),
+                     legend.title=element_text(size=84),
+                     legend.position="bottom",
+                     legend.direction="horizontal",
+                     legend.title.position="top")) +
+               guides(fill=guide_legend(override.aes=list(size=20),
+                                        nrow=3)))
+figS4Plt2 <- plot_spacer() +
+            (ggplot() + theme_void() + labs(tag="A") + theme(plot.tag = element_text(face = "bold", size = 100))) +
+             plot_spacer() +
+             plot_layout(widths=c(0.5, 1, 0.5))
+# figS4Plt3 <- (ggplot() + theme_void() + labs(tag="D") + theme(plot.tag = element_text(face = "bold", size = 100)))
+
+# Combine
+figS4Plt <- figS4Plt2 /
+            figS4Plt1 +
+            plot_layout(heights=c(1.5, 1))
+
+# Visualise
+figS4Plt
+
+# Save
+ggsave(here::here(figDir,
+                  "figS4_ppcaOnDiffAbundSigProteins.png"),
+       figS4Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS4_ppcaOnDiffAbundSigProteins.pdf"),
+       figS4Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+rm(plotList)
+rm(figS4Plt)
+rm(figS4Plt1)
+rm(figS4Plt2)
+
+```
+
+
+#### Figure S5
+
+Candidates summaries.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`04_eda_figs.rds` = readRDS(here::here("results", runName, "figs", "04_eda_figs.rds")))
+
+plotList$`04_eda_figs.rds`$normAbundancePPCA_colByPlate$layers[[1]]$aes_params$size <- 16
+
+# Plot PPCA
+figS5Plt2 <- (plotList$`04_eda_figs.rds`$normAbundancePPCA_colByPlate +
+              ggtitle("Probabilistic PCA On All Proteins")) +
+              geom_point(size=16,
+                         color="white") +
+              geom_point(size=16,
+                         mapping=aes(fill=PLATE),
+                         alpha=0.85,
+                         shape=21) +
+            theme_classic() +
+            theme(plot.tag = element_text(face = "bold", 
+                                          size = 100),
+                  plot.title=element_text(size=128),
+                  axis.text=element_text(size=84),
+                  axis.title=element_text(size=128),
+                  legend.text=element_text(size=108),
+                  legend.title=element_text(size=128),
+                  legend.position="right",
+                  legend.direction="vertical") &
+            guides(fill=guide_legend(override.aes=list(size=28)))
+ 
+figS5Plt <- figS5Plt2
+figS5Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS5_probPCAOnNormalisedData.png"),
+       figS5Plt,
+       width=10000,
+       height=7500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS5_probPCAOnNormalisedData.pdf"),
+       figS5Plt,
+       width=10000,
+       height=7500,
+       device="pdf",
+       units="px")
+
+rm(figS5Plt)
+rm(figS5Plt1)
+rm(figS5Plt2)
+rm(plotList)
+
+```
+
+#### Figure S6
+
+```{r, fig.height=32, fig.width=32}
+
+# Read in 
+plotList = list(`04_eda_figs.rds` = readRDS(here::here("results", runName, "figs", "06_differentialAbundance_figs.rds")))
+
+# Plot PPCA
+fig6Plt <- (((plotList$`04_eda_figs.rds`$sigDresdenProtsPPCA_colByCondSitePC12 + labs(tag="A") + ggtitle("PPCA on Dresden-Only\nDifferentially Abundant Proteins")) +
+             (plotList$`04_eda_figs.rds`$sigDresdenProtsPPCA_colByCondSitePC23 + labs(tag="B") + ggtitle("PPCA on Dresden-Only\nDifferentially Abundant Proteins"))) /
+            ((plotList$`04_eda_figs.rds`$sigDresdenProtsPPCA_colByCondSitePC34 + labs(tag="C") + ggtitle("PPCA on Dresden-Only\nDifferentially Abundant Proteins")) +
+             (plotList$`04_eda_figs.rds`$sigDresdenProtsPPCA_colByCondSitePC45 + labs(tag="D") + ggtitle("PPCA on Dresden-Only\nDifferentially Abundant Proteins")))) +
+            plot_layout(guides="collect") &
+            labs(fill="Condition\nAnd Site") &
+               scale_fill_manual(breaks=factor(c("CNO_Dresden", 
+                                                 "Crohn_Dresden",
+                                                 "Oncology_Dresden", 
+                                                 "Healthy_Liverpool",
+                                                 "Healthy_Vanderbilt",
+                                                 "InfOsteitis_Vanderbilt"),
+                                 levels=c("CNO_Dresden", 
+                                          "Crohn_Dresden",
+                                          "Oncology_Dresden", 
+                                          "Healthy_Liverpool",
+                                          "Healthy_Vanderbilt",
+                                          "InfOsteitis_Vanderbilt")),
+                                 labels=c("CNO (Dresden)", 
+                                          "Crohn (Dresden)",
+                                          "Oncology (Dresden)", 
+                                          "Healthy (Liverpool)",
+                                          "Healthy (Vanderbilt)",
+                                          "InfOsteitis (Vanderbilt)"),
+                                 values=condSiteCols) &
+            theme(plot.tag = element_text(face = "bold", 
+                                          size = 100),
+                  plot.title=element_text(size=64),
+                  axis.text=element_text(size=64),
+                  axis.title=element_text(size=86),
+                  legend.text=element_text(size=56),
+                  legend.title=element_text(size=64),
+                  legend.position="bottom",
+                  legend.title.position="left",
+                  legend.direction="horizontal") &
+            guides(fill=guide_legend(override.aes=list(size=20)))
+
+fig6Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS6_ppcaByCondSite.png"),
+       fig6Plt,
+       width=10000,
+       height=11500,
+       units="px")
+ggsave(here::here(figDir, 
+                  "figS6_ppcaByCondSite.pdf"),
+       fig6Plt,
+       width=10000,
+       height=11500,
+       units="px")
+# 
+# # rm(fig6Plt)
+# rm(plotList)
+
+```
+
+#### Figure S8
+
+#### Figure S9
+
+#### Figure S10
+
+Permutation importance of discovery data.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`10_finalModel_figs.rds` = readRDS(here::here("results", runName, "figs", "10_finalModel_figs.rds")))
+
+# Combine
+figS10Plt <- (plotList$`10_finalModel_figs.rds`$varImportancePerGroup_discovery_biModal + labs(tag="A") +
+                scale_x_continuous(breaks=c(0, 0.03, 0.06)) +
+                ggtitle("Bi-Modal")) /
+             (plotList$`10_finalModel_figs.rds`$varImportancePerGroup_discovery_biModalWithMultiGroupProteins + labs(tag="B") +
+                scale_x_continuous(breaks=c(0, 0.02, 0.04)) +
+                ggtitle("Bi-Modal with All Panel Proteins")) +
+  plot_layout(axis_titles = "collect_x",
+              guides = "collect",
+              heights = c(0.45,1.1)) &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        plot.title=element_text(size=100),
+        axis.text.y=element_text(size=56),
+        axis.text.x=element_text(size=48),
+        axis.title.y=element_text(size=84),
+        axis.title.x=element_text(size=84),
+        strip.text=element_text(size=72),
+        legend.title=element_text(size=72),
+        legend.text=element_text(size=64),
+        legend.justification='left',
+        legend.position="bottom") &
+  labs(y="Selected Protein",
+       x="Permutation Importance") &
+  scale_color_manual(values=condCols) &
+  guides(color=guide_legend(override.aes=list(size=24),
+                            nrow=1,
+                            byrow=TRUE))
+
+figS10Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS10_discoveryModel_permutationImportance_biModal.png"),
+       figS10Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS10_discoveryModel_permutationImportance_biModal.pdf"),
+       figS10Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+rm(plotList)
+rm(figS10Plt)
+
+```
+
+#### Figure S11
+
+Permutation importance of discovery data.
+
+```{r, fig.height=24, fig.width=32}
+
+# Read in 
+plotList = list(`10_finalModel_figs.rds` = readRDS(here::here("results", runName, "figs", "10_finalModel_figs.rds")))
+
+# Combine
+figS11Plt <- (plotList$`10_finalModel_figs.rds`$varImportancePerGroup_discovery_multiGroup +
+                scale_x_continuous(breaks=c(0, 0.03, 0.06)) +
+                ggtitle("Multi-Modal")) +
+  plot_layout(axis_titles = "collect_x") &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        plot.title=element_text(size=100),
+        axis.text.y=element_text(size=56),
+        axis.text.x=element_text(size=48),
+        axis.title.y=element_text(size=84),
+        axis.title.x=element_text(size=84),
+        strip.text=element_text(size=72),
+        legend.title=element_text(size=72),
+        legend.text=element_text(size=64),
+        legend.justification='left',
+        legend.position="bottom") &
+  labs(y="Selected Protein",
+       x="Permutation Importance") &
+  scale_color_manual(values=condCols) &
+  guides(color=guide_legend(override.aes=list(size=24),
+                            nrow=1,
+                            byrow=TRUE))
+
+figS11Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS11_discoveryModel_permutationImportance_multiGroup.png"),
+       figS11Plt,
+       width=10000,
+       height=8500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS11_discoveryModel_permutationImportance_multiGroup.pdf"),
+       figS11Plt,
+       width=10000,
+       height=8500,
+       device="pdf",
+       units="px")
+
+rm(figS11Plt)
+rm(plotList)
+
+```
+
+#### Figure S12
+
+Create standalone legend for evaluating randomisation
+
+```{r, fig.height=7, fig.width=32}
+
+# Modify iris
+data(iris)
+iris$Species <- as.character(iris$Species)
+iris <- iris[iris$Species != "virginica",]
+iris[iris$Species == "setosa",]["Species"] <- "Observed"
+iris[iris$Species == "versicolor",]["Species"] <- "Randomised"
+
+# Get dummy plot
+iris$Species <- factor(iris$Species)
+dummyPlt <- ggplot(iris,
+                   aes(y=Sepal.Length,
+                       x=Species,
+                       color=Species)) + 
+                   geom_vline(aes(xintercept=Species,
+                                  color=Species),
+                              linetype=1,
+                              linewidth=3.5,
+                              key_glyph = "path") +
+                   scale_color_manual(values=c("Observed"="mediumblue",
+                                               "Randomised"="salmon")) +
+                   geom_bar(stat="identity",
+                            color="black") +
+                   labs(color="Median MCC") +
+                   theme_minimal() +
+                   theme(legend.direction="vertical",
+                         legend.title.position="left",
+                         legend.key.width=unit(20, "line"),
+                         legend.title=element_text(size=88),
+                         legend.text=element_text(size=80)) +
+  guides(color=guide_legend(override.aes=list(linewidth=4)))
+
+# Using the cowplot package
+legend <- cowplot::get_legend(dummyPlt)
+dummyPlt
+
+```
+
+Plot shuffled label and decoy protein abundances for 10-fold training data. On discovery data.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`10_finalModel_figs.rds` = readRDS(here::here("results", runName, "figs", "10_finalModel_figs.rds")))
+
+# Combine
+figS12Plt <- (plotList$`10_finalModel_figs.rds`$shuffledLabelsMCC_biModalProts + labs(tag="A")) /
+           # plot_spacer() /
+            (plotList$`10_finalModel_figs.rds`$shuffledLabelsMCC_multiModalProts + theme(legend.position="none") + labs(tag="B")) /
+           # plot_spacer() /
+           (plotList$`10_finalModel_figs.rds`$decoyProtsMCC_biModalProts + labs(tag="C")) /
+           # plot_spacer() /
+            (plotList$`10_finalModel_figs.rds`$decoyProtsMCC_multiModalProts + labs(tag="D")) /
+           (legend) +
+  plot_layout(heights = c(1,1,1,1,0.5)) &
+  labs(y="MCC") &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        plot.title=element_text(size=64),
+        legend.title=element_blank(),
+        axis.text.y=element_text(size=42),
+        axis.title.y=element_text(size=72),
+        axis.title.x=element_text(size=72),
+        strip.text.x=element_text(size=72),
+        strip.text.y=element_text(size=52))
+
+figS12Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS12_discoveryModel_10FoldSplit_randomisationPerformance.png"),
+       figS12Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS12_discoveryModel_10FoldSplit_randomisationPerformance.pdf"),
+       figS12Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+rm(figS12Plt)
+rm(plotList)
+
+```
+
+#### Figure S13
+
+Plot shuffled label and decoy protein abundances for held-out test data. On discovery data
+
+```{r, fig.height=24, fig.width=32}
+
+# Read in 
+plotList = list(`10_finalModel_figs.rds` = readRDS(here::here("results", runName, "figs", "10_finalModel_figs.rds")))
+
+
+plotList$`10_finalModel_figs.rds`$shuffledLabelsMCC_heldOutTestData$layers[[3]]$aes_params$width <- 0.3
+
+# Combine
+figS13Plt <- (plotList$`10_finalModel_figs.rds`$shuffledLabelsMCC_heldOutTestData + labs(tag="A") +
+                theme(legend.position = "none")) /
+             (plotList$`10_finalModel_figs.rds`$decoyProtsMCC_heldOutTestData + labs(tag="B") +
+                labs(fill="Condition") +
+                theme(legend.position="bottom",
+                      legend.direction="horizontal",
+                      legend.text=element_text(size=68),
+                      legend.key.size = unit(6.5, "line"),
+                      legend.title=element_text(size=76))) +
+  plot_layout(heights = c(1,1)) &
+  labs(y="MCC",
+       x="Predictions") &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        plot.title=element_text(size=72),
+        axis.text.y=element_text(size=72),
+        axis.title.y=element_text(size=100),
+        axis.title.x=element_text(size=100),
+        strip.text.x=element_text(size=72),
+        strip.text.y=element_text(size=84))
+figS13Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS13_discoveryModel_heldOutData_randomisationPerformance.png"),
+       figS13Plt,
+       width=10000,
+       height=10000,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS13_discoveryModel_heldOutData_randomisationPerformance.pdf"),
+       figS13Plt,
+       width=10000,
+       height=10000,
+       device="pdf",
+       units="px")
+
+rm(figS13Plt)
+rm(plotList)
+
+```
+
+#### Figure S14
+
+Missing protein/sample enumaration, filtration and abundance distribution evaluation.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`11_validationDataProcessQC_figs.rds` = readRDS(here::here("results", runName, "figs", "11_validationDataProcessQC_figs.rds")),
+                `12_validationDataNormEDA_figs.rds` = readRDS(here::here("results", runName, "figs", "12_validationDataNormEDA_figs.rds")))
+
+# Change text size
+plotList$`11_validationDataProcessQC_figs.rds`$NProtsAllProts_validData$layers[[3]]$aes_params$size <- 20
+plotList$`11_validationDataProcessQC_figs.rds`$NProtsSerumQCProts_validData$layers[[3]]$aes_params$size <- 20
+plotList$`12_validationDataNormEDA_figs.rds`$sampleAbundDistribution_colByCondition_raw_validData$layers[[1]]$aes_params$linewidth <- 0.5
+plotList$`12_validationDataNormEDA_figs.rds`$sampleAbundDistribution_colByCondition_raw_validData$layers[[1]]$aes_params$size <- 2
+plotList$`12_validationDataNormEDA_figs.rds`$sampleAbundDistribution_colByCondition_cyclicLoessNorm_validData$layers[[1]]$aes_params$linewidth <- 0.5
+plotList$`12_validationDataNormEDA_figs.rds`$sampleAbundDistribution_colByCondition_cyclicLoessNorm_validData$layers[[1]]$aes_params$size <- 2
+
+# Combine
+figS14Plt <- ((plotList$`11_validationDataProcessQC_figs.rds`$UnFiltProtAbundanceSerumQC_validData + labs(tag="A",
+                                                                                                          x="Serum QC",
+                                                                                                          y="Log2 Protein\nAbundance") +
+               scale_x_discrete(labels=c("UnFilt", "25%", "20%", "15%", "10%", "5%")) +
+                 ggtitle("All Proteins") +
+                 theme(axis.text.x=element_text(size=56),
+                       axis.title.y=element_text(size=72),
+                       axis.text.y=element_text(size=56),
+                       axis.title.x=element_text(size=72))) +
+              (plotList$`11_validationDataProcessQC_figs.rds`$SerumQCFiltProtAbundanceSerumQC_validData + labs(tag="B",
+                                                                                                          x="Serum QC",
+                                                                                                          y="Log2 Protein\nAbundance") +
+               scale_x_discrete(labels=c("UnFilt", "25%", "20%", "15%", "10%", "5%")) +
+                 ggtitle("Filtered for Serum QC Proteins") +
+                 theme(axis.text.x=element_text(size=56),
+                       axis.title.y=element_blank(),
+                       axis.text.y=element_blank(),
+                       axis.title.x=element_text(size=72))) + plot_layout(axis_titles="collect")) /
+             ((plotList$`12_validationDataNormEDA_figs.rds`$sampleAbundDistribution_colByCondition_raw_validData + labs(tag="C",
+                                                                                                     
+                                                                                                                                              x="Validation Samples",
+                                                                                                                           y=expression(atop(Log[2],
+                                                                                                                                             "(Abundance)"))) +
+                 ggtitle("Un-Normalised")) +
+                 theme(axis.title.y=element_text(size=72),
+                       axis.text.y=element_text(size=56)) +
+              (plotList$`12_validationDataNormEDA_figs.rds`$sampleAbundDistribution_colByCondition_cyclicLoessNorm_validData + labs(tag="D",
+                                                                                                                                    x="Validation Samples",
+                                                                                                                                    y=expression(atop(Log[2],
+                                                                                                                                                      "(Abundance)")))) /
+                 ggtitle("Cyclic LOESS-Normalised") +
+                 theme(axis.title.y=element_blank(),
+                       axis.text.y=element_blank())) +
+             ((plotList$`11_validationDataProcessQC_figs.rds`$NProtsAllProts_validData + labs(tag="E",
+                                                                                    y="Number of\nProteins") +  
+               scale_x_discrete(labels=c("UnFilt", "25%", "20%", "15%", "10%", "5%")) +
+                 scale_y_continuous(limits=c(0, 1050)) +
+                 ggtitle("Unfiltered") +
+                 labs(x="Threshold of\nMissing Values") +
+                 theme(axis.text.x=element_text(size=52),
+                       axis.title.x=element_text(size=64),
+                       axis.text.y=element_text(size=56))) +
+              (plotList$`11_validationDataProcessQC_figs.rds`$NProtsSerumQCProts_validData + labs(tag="F",
+                                                                                    y="Number of\nProteins") + 
+               scale_x_discrete(labels=c("UnFilt", "25%", "20%", "15%", "10%", "5%")) +
+                 scale_y_continuous(limits=c(0, 1050)) +
+                 ggtitle("Filtered for Serum QC Proteins") +
+                 labs(x="Threshold of\nMissing Values") +
+                 theme(axis.text.x=element_text(size=52),
+                       axis.title.x=element_text(size=64),
+                       axis.title.y=element_blank(),
+                       axis.text.y=element_blank()))) +
+  plot_layout(guides="collect",
+              axis_titles = "collect_y") &
+                scale_fill_manual(values=condCols,
+                                  breaks=c(factor(c("CNO", 
+                                                 "Crohn", 
+                                                 "Healthy", 
+                                                 "InfOsteitis",
+                                                 "Oncology"),
+                                                levels=c("CNO", 
+                                                         "Crohn", 
+                                                         "Healthy", 
+                                                         "InfOsteitis",
+                                                         "Oncology")))) &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        plot.title=element_text(size=64),
+        axis.title=element_text(size=84),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.text=element_text(size=68),
+        legend.title=element_text(size=72),
+        legend.key.size=unit(4.5, "cm"),
+        legend.title.position="left",
+        legend.position="bottom",
+        legend.direction="horizontal") &
+  guides(fill=guide_legend(nrow=2,
+                           byrow=TRUE))
+
+# Plot
+figS14Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS14_validationData_sampleQC.png"),
+       figS14Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS14_validationData_sampleQC.pdf"),
+       figS14Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+# rm(plotList)
+rm(figS14Plt)
+
+```
+
+#### Figure S15
+
+Comparative differential abundance analysis comparing Discovery to Validation.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`14_validationDataDiffAbundance_figs.rds` = readRDS(here::here("results", runName, "figs", "14_validationDataDiffAbundance_figs.rds")))
+
+# Edit point sizes
+plotList$`14_validationDataDiffAbundance_figs.rds`$barbellPlot_logFC_discoVsValid$layers[[4]]$aes_params$size <- 18
+plotList$`14_validationDataDiffAbundance_figs.rds`$barbellPlot_logFC_discoVsValid_justCRP$layers[[4]]$aes_params$size <- 18
+plotList$`14_validationDataDiffAbundance_figs.rds`$barbellPlot_logFC_discoVsValid$layers[[1]]$aes_params$linewidth <- 2
+plotList$`14_validationDataDiffAbundance_figs.rds`$barbellPlot_logFC_discoVsValid_justCRP$layers[[1]]$aes_params$linewidth <- 2
+
+# Plot
+figS15Plt <- ((plotList$`14_validationDataDiffAbundance_figs.rds`$barbellPlot_logFC_discoVsValid + 
+                labs(x="",
+                     y="Candidate Protein") +
+                facet_grid(cols=vars(Condition),
+                           rows=vars(SigInValidation),
+                           labeller = labeller(SigInValidation=c(ns="ns",
+                                                                 `FDR < 0.05`="Sig")),
+                           scale="free",
+                           space="free_y") +
+                scale_x_continuous(limits=c(-2.75, 2.75),
+                                   breaks=c(-2, 0, 2),
+                                   labels=c(-2, 0, 2)) +
+                theme(legend.position="none",
+                      legend.title.position="top",
+                      legend.justification = "left",
+                      panel.spacing.y = unit(2, "lines"),
+                      strip.text.x=element_text(size=80),
+                      strip.text.y=element_text(size=92),
+                      axis.title.x=element_blank()) +
+                 guides(fill=guide_legend(byrow=TRUE))) /
+             (plot_spacer() + labs(y="") + theme(legend.position="none")) /
+             (plotList$`14_validationDataDiffAbundance_figs.rds`$barbellPlot_logFC_discoVsValid_justCRP + 
+                labs(y="",
+                     x="Log FC",
+                     shape="Consistent\nLogFC",
+                     fill="Condition\nBy Cohort") +
+                facet_grid(cols=vars(Condition),
+                           rows=vars(SigInValidation),
+                           labeller = labeller(SigInValidation=c(ns=" ",
+                                                                 `FDR < 0.05`="Sig")),
+                           scale="free",
+                           space="free_y") +
+                theme(legend.position = "bottom",
+                      legend.direction="horizontal",
+                      legend.text=element_text(size=88),
+                      legend.title=element_text(size=100),
+                      legend.title.position="top",
+                      panel.spacing.y = unit(2, "lines"),
+                      strip.text.y=element_text(size=92),
+                      strip.text.x=element_blank(),
+                      legend.key.size = unit(6, "line")) +
+                guides(fill=guide_legend(override.aes=list(size=36,
+                                                           shape=21,
+                                                           pattern="none"),
+                                         ncol=2,
+                                         byrow=TRUE),
+                       shape=guide_legend(override.aes=list(size=36,
+                                                            ncol=1,
+                                                            shape=c(22, 21)),
+                                          ncol=1),
+                       alpha="none")) + 
+             plot_layout(axis_titles="collect") &
+             theme(axis.text=element_text(size=56)) & 
+  scale_fill_manual(breaks=factor(c("Discovery.Crohn", 
+                                    "Validation.Crohn",
+                                    "Discovery.Healthy",
+                                    "Validation.Healthy",
+                                    "Discovery.InfOsteitis",
+                                    "Validation.InfOsteitis", 
+                                    "Discovery.Oncology",
+                                    "Validation.Oncology"),
+                                  levels=c("Discovery.Crohn", 
+                                           "Validation.Crohn",
+                                           "Discovery.Healthy" ,
+                                           "Validation.Healthy",
+                                           "Discovery.InfOsteitis",
+                                           "Validation.InfOsteitis",
+                                           "Discovery.Oncology",
+                                           "Validation.Oncology")),
+                      labels=c("Crohn (D)",
+                               "Crohn (V)",
+                               "Healthy (D)",
+                               "Healthy (V)",
+                               "InfOsteitis (D)",
+                               "InfOsteitis (V)",
+                               "Oncology (D)",
+                               "Oncology (V)"),
+                      values=condStudyCols)) &
+                      plot_layout(heights=c(1, -0.075, 0.105)) &
+                      theme(plot.tag = element_text(face = "bold", 
+                                                    size = 100),
+                            strip.background.x=element_blank(),
+                            axis.title.y=element_text(size=108),
+                            axis.title.x=element_text(size=108),
+                            axis.text.x=element_text(size=80),
+                            axis.text.y=element_text(size=70)) 
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS15_differentialAbundance_discoveryVsValidation_barbellLogFC.png"),
+       figS15Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS15_differentialAbundance_discoveryVsValidation_barbellLogFC.pdf"),
+       figS15Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+# Remove to clear space
+rm(figS15Plt)
+rm(plotList)
+gc()
+
+```
+
+#### Figure S16
+
+Showing the variance of CRP
+
+```{r, fig.height=32, fig.width=32}
+
+# Read in 
+plotList = list(`15_validationDataPredictionModelling_figs_bPCA.rds` = readRDS(here::here("results", runName, "figs", "15_validationDataPredictionModelling_figs_bPCA.rds")),
+                `10_finalModel_figs.rds` = readRDS(here::here("results", runName, "figs", "10_finalModel_figs.rds")))
+
+# Update point sizes
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_byCRPAbundance_inDiscoData_bPCA@layers$geom_point$aes_params["size"] <- 12
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_byCRPAbundance_bPCA@layers$geom_point$aes_params["size"] <- 12
+
+# Increase widths of boxplots
+plotList$`10_finalModel_figs.rds`$CNO_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["width"] <- 25
+plotList$`10_finalModel_figs.rds`$Healthy_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["width"] <- 25
+plotList$`10_finalModel_figs.rds`$Crohn_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["width"] <- 25
+plotList$`10_finalModel_figs.rds`$InfOsteitis_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["width"] <- 25
+plotList$`10_finalModel_figs.rds`$Oncology_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["width"] <- 25
+
+plotList$`10_finalModel_figs.rds`$CNO_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`10_finalModel_figs.rds`$Healthy_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`10_finalModel_figs.rds`$Crohn_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`10_finalModel_figs.rds`$InfOsteitis_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`10_finalModel_figs.rds`$Oncology_relAbundancePlot_crpAbundance_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+
+plotList$`10_finalModel_figs.rds`$CNO_relAbundancePlot_crpAbundance_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`10_finalModel_figs.rds`$Healthy_relAbundancePlot_crpAbundance_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`10_finalModel_figs.rds`$Crohn_relAbundancePlot_crpAbundance_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`10_finalModel_figs.rds`$InfOsteitis_relAbundancePlot_crpAbundance_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`10_finalModel_figs.rds`$Oncology_relAbundancePlot_crpAbundance_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$CNO_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Healthy_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Crohn_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$InfOsteitis_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Oncology_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_boxplot$aes_params["fill"] <- "white"
+
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$CNO_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Healthy_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Crohn_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$InfOsteitis_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Oncology_relAbundancePlot_crpAbundance_vaildData_bPCA@layers$geom_beeswarm$aes_params["colour"] <- "black"
+
+# Plot ranked CRP abundances
+p1 <- (( plotList$`10_finalModel_figs.rds`$CNO_relAbundancePlot_crpAbundance_bPCA + labs(x="",
+                                                                                         title="CNO",
+                                                                                        y="Log2\nAbundance") + theme(axis.text.y=element_text(size=64)) |
+        plotList$`10_finalModel_figs.rds`$Healthy_relAbundancePlot_crpAbundance_bPCA + labs(x="",
+                                                                                            title="Healthy",
+                                                                                        y="") +
+                                                                                        theme(axis.text.y=element_blank()) |
+        plotList$`10_finalModel_figs.rds`$Crohn_relAbundancePlot_crpAbundance_bPCA + labs(y="",
+                                                                                          title="Crohn",
+                                                                                          x="Rank of Protein") +
+                                                                                     theme(axis.text.y=element_blank()) |
+        plotList$`10_finalModel_figs.rds`$InfOsteitis_relAbundancePlot_crpAbundance_bPCA + labs(x="",
+                                                                                                title="Inf Osteitis",
+                                                                                                y="") +
+                                                                                           theme(axis.text.y=element_blank()) |
+        plotList$`10_finalModel_figs.rds`$Oncology_relAbundancePlot_crpAbundance_bPCA + labs(x="",
+                                                                                             title="Oncology",
+                                                                                             y="") +
+                                                                                        theme(axis.text.y=element_blank())) &
+        scale_y_continuous(limits=c(0, 17),
+                           breaks=c(5, 10, 15))) &
+  theme(plot.title=element_text(size=64))
+p2 <- (( plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$CNO_relAbundancePlot_crpAbundance_vaildData_bPCA + labs(x="",
+                                                                                                                              y="Log2\nAbundance",
+                                                                                                                              title="CNO") + theme(axis.text.y=element_text(size=64)) |
+        plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Healthy_relAbundancePlot_crpAbundance_vaildData_bPCA + labs(x="",
+                                                                                                                                  y="",
+                                                                                                                                  title="Healthy") +
+                                                                                                                             theme(axis.text.y=element_blank()) |
+        plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Crohn_relAbundancePlot_crpAbundance_vaildData_bPCA + labs(y="",
+                                                                                                                                x="Rank of Protein",
+                                                                                                                                title="Crohn") +
+                                                                                                                           theme(axis.text.y=element_blank()) |
+        plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$InfOsteitis_relAbundancePlot_crpAbundance_vaildData_bPCA + labs(x="",
+                                                                                                                                      y="",
+                                                                                                                                      title="Inf Osteoitis") +
+                                                                                                                           theme(axis.text.y=element_blank()) |
+        plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$Oncology_relAbundancePlot_crpAbundance_vaildData_bPCA + labs(x="",
+                                                                                                                                   y="",
+                                                                                                                                   title="Oncology") +
+                                                                                                                           theme(axis.text.y=element_blank())) &
+        scale_y_continuous(limits=c(0, 17),
+                           breaks=c(5, 10, 15))) &
+  theme(plot.title=element_text(size=64))
+
+# Mis-prediction
+p3 <- ((plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_byCRPAbundance_inDiscoData_bPCA + labs(title="Discovery") + guides(fill="none")) | 
+        plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$misPredict_byCRPAbundance_bPCA + labs(y="",
+                                                                                                            title="Validation")) + 
+        guides(fill=guide_legend(override.aes=list(size=24,
+                                 shape=21),
+                                 nrow=1),
+        ) +
+                scale_fill_manual(values=condCols,
+                                  breaks=c(factor(c("CNO", 
+                                                 "Crohn", 
+                                                 "Healthy"),
+                                                levels=c("CNO", 
+                                                         "Crohn", 
+                                                         "Healthy")))) +
+  plot_layout(guides="collect",
+              ncol=2) &
+  labs(x="CNO Samples",
+       fill="Prediction") &
+  theme(legend.position="bottom",
+        legend.title.position="top",
+        legend.title=element_text(size=72),
+        legend.text=element_text(size=64),
+        axis.text.y=element_text(size=64),
+        plot.title=element_text(size=96)) &
+  guides(shape=guide_legend(override.aes=list(size=24),
+                            nrow=1))
+p3
+
+# Define design
+design <- "AAAAA
+           BBBBB
+           KKKKK"
+
+# Combine
+figS16Plt <- wrap_plots(list(wrap_elements(p1),
+                             wrap_elements(p2),
+                             wrap_elements(p3)),
+                        design = design) +
+             plot_layout(heights=c(1, 1, 1.65)) +
+             plot_annotation(tag_levels = "A") &
+             theme(axis.title.x=element_text(size=84),
+                   axis.text.x=element_text(size=64),
+                   plot.tag=element_text(size=100,
+                                         face = "bold"),
+                   plot.tag.position = c(0.025, 0.94) )
+figS16Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS16_abundanceVariability_misPrediction_CRP.png"),
+       figS16Plt,
+       width=10000,
+       height=10000,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS16_abundanceVariability_misPrediction_CRP.pdf"),
+       figS16Plt,
+       width=10000,
+       height=10000,
+       device="pdf",
+       units="px")
+
+rm(figS16Plt)
+rm(plotList)
+
+```
+
+#### Figure S17
+
+Plot shuffled label and decoy protein abundances for discovery data, using proteins detected in validation
+
+```{r, fig.height=24, fig.width=32}
+
+# Read in 
+plotList = list(`15_validationDataPredictionModelling_figs_bPCA.rds` = readRDS(here::here("results", runName, "figs", "15_validationDataPredictionModelling_figs_bPCA.rds")))
+
+# Combine
+figS17Plt <- (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$shuffledLabelsMCC_multiGroup_validData_bPCA + labs(tag="A") +
+                theme(legend.position = "none")) /
+             (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$decoyProtsMCC_multiGroup_validData_bPCA + labs(tag="B") +
+                labs(fill="Condition") +
+                theme(legend.position="bottom",
+                      legend.direction="horizontal",
+                      legend.text=element_text(size=72),
+                      legend.key.size = unit(7, "line"),
+                      legend.title=element_text(size=80)) +
+                guides(fill=guide_legend(nrow=2,
+                                         byrow=TRUE)) +
+                scale_fill_manual(values=condCols,
+                                  breaks=c(factor(c("CNO",
+                                                 "Crohn",
+                                                 "Healthy",
+                                                 "InfOsteitis",
+                                                 "Oncology"),
+                                                levels=c("CNO",
+                                                         "Crohn",
+                                                         "Healthy",
+                                                         "InfOsteitis",
+                                                         "Oncology"))))) +
+                plot_layout(heights = c(1,1)) &
+                labs(y="MCC",
+                     x="Predictions") &
+                theme(plot.tag = element_text(face = "bold", 
+                                              size = 100),
+                      plot.title=element_text(size=72),
+                      axis.text.y=element_text(size=72),
+                      axis.title.y=element_text(size=100),
+                      axis.title.x=element_text(size=100),
+                      strip.text.x=element_text(size=72),
+                      strip.text.y=element_text(size=80))
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS17_validationData_randomisationPerformance.png"),
+       figS17Plt,
+       width=10000,
+       height=10000,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS17_validationData_randomisationPerformance.pdf"),
+       figS17Plt,
+       width=10000,
+       height=10000,
+       device="pdf",
+       units="px")
+
+rm(figS17Plt)
+rm(plotList)
+
+```
+
+#### Figure S18
+
+Model metric performances on the discovery cohort.
+
+```{r, fig.height=40, fig.width=32}
+
+# Read in 
+plotList = list(`15_validationDataPredictionModelling_figs_bPCA.rds` = readRDS(here::here("results", runName, "figs", "15_validationDataPredictionModelling_figs_bPCA.rds")))
+
+# Change size and alpha of points
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_biModal_bPCA$layers[[2]]$aes_params$size <- 10
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_biModal_bPCA$layers[[2]]$aes_params$alpha <- 0.675
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_biModalWithMultiGroupProteins_bPCA$layers[[2]]$aes_params$size <- 10
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_biModalWithMultiGroupProteins_bPCA$layers[[2]]$aes_params$alpha <- 0.675
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_multiGroup_bPCA$layers[[2]]$aes_params$size <- 8
+plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_multiGroup_bPCA$layers[[2]]$aes_params$alpha <- 0.675
+
+
+# --- create a common theme to reduce grob-width differences ---
+common_theme <- theme(
+  strip.text = element_text(size = 52),
+  axis.text.x  = element_text(size = 64),
+  plot.margin = margin(5, 5, 5, 5)
+)
+
+# --- build each sub-plot separately for clarity ---
+pA <- plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_biModal_bPCA +
+  facet_wrap(~ variable, ncol = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "A", title = "Bi-Modal") +
+  common_theme +
+  theme(axis.text.x = element_text(size=72),
+        axis.text.y = element_text(size = 64),
+        axis.title.y = element_text(size = 100,
+                                        angle=90),
+        legend.position="none") +
+  # hide fill legend here so only one plot supplies it to be collected
+  guides(color = "none")
+
+pB <- plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_biModalWithMultiGroupProteins_bPCA +
+  facet_wrap(~ variable, ncol = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "B", 
+       title = "Bi-Modal\n(Whole Panel)") +
+  common_theme +
+  # remove redundant left axis elements to avoid double-reserving left space
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_text(size = 72),
+        legend.position="none")
+
+# This plot will supply the legend (so don't hide its legend)
+pC <- plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$modelMetrics_discoveryWithOnlyValidProts_multiGroup_bPCA +
+  facet_wrap(~ variable, ncol = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "C") +
+  common_theme +
+  # remove left y-axis items so they don't take extra space
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = c(-0.275, -0.1),
+        legend.direction="horizontal",
+        axis.text.x = element_text(size = 72, 
+                                   angle = 90, 
+                                   hjust = 1, 
+                                   vjust = 0.5))
+
+# bottom row plot (held-out data)
+pD <- plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$multiModelProtsMetrics_heldOutData_validData_bPCA +
+  geom_text(mapping = aes(y = value - 0.05, label = round(value, 2)),
+            color = "white", hjust = 1, angle = 90, size = 24) +
+  facet_wrap(~ variable, nrow = 2,
+             labeller=labeller(
+               variable=c(
+                          `Bal Acc` = "B Acc",
+                          AUCROC = "AUC",
+                          Specificity = "Spec",
+                          Sensitivity = "Sens"
+               )
+             )) +
+  labs(tag = "D") +
+  common_theme +
+  theme(legend.direction = "horizontal",
+        legend.position = "bottom",
+        legend.key.size = unit(6, "line"),
+        legend.title = element_text(size = 88),
+        legend.text = element_text(size = 80),
+        axis.text.x = element_blank())
+
+# --- Combine with patchwork ---
+# Important notes applied:
+# - only pC provides the legend (show.legend = TRUE); guides = "collect" will therefore
+#   collect a single, consistent legend and place it where we request
+# - widths are set to favour the right-hand multi-panel plot, but because we've
+#   removed duplicated left-axis grob widths and standardized theme settings,
+#   columns will be much more proportional
+figS18Plt <- (
+  (pA + pB + pC) +
+    plot_layout(widths = c(1, 1, 1.5)) &
+    labs(color="Condition") &
+    theme(
+      legend.title = element_text(size = 88),
+      legend.text = element_text(size = 80),
+      axis.text.x = element_blank()) &
+    guides(color=guide_legend(override.aes=list(size=28),
+                              nrow=2,
+                              byrow=TRUE))
+) /
+  plot_spacer() /
+  (pD + 
+  theme(axis.title.y = element_text(size = 100,
+                                    angle=90),
+        axis.text.y  = element_text(size = 64))) +
+  plot_layout(heights = c(1, 0.1, 0.75), axes = "collect_y", axis_titles = "collect_y") &
+  labs(fill = "Condition") &
+  scale_y_continuous(breaks = c(0, 0.5, 1), limits = c(-0.05, 1.05)) & 
+  theme(
+    plot.tag = element_text(face = "bold", size = 100),
+    plot.title = element_text(size = 88),
+    strip.text = element_text(size = 84),
+    axis.title.x = element_blank(),
+  ) &
+               scale_fill_manual(values=condCols,
+                                 breaks=c(factor(c("CNO", 
+                                                "Crohn", 
+                                                "Healthy", 
+                                                "InfOsteitis",
+                                                "Oncology"),
+                                               levels=c("CNO", 
+                                                        "Crohn", 
+                                                        "Healthy", 
+                                                        "InfOsteitis",
+                                                        "Oncology")))) &
+               scale_color_manual(values=condCols,
+                                  breaks=c(factor(c("CNO", 
+                                                 "Crohn", 
+                                                 "Healthy", 
+                                                 "InfOsteitis",
+                                                 "Oncology"),
+                                                levels=c("CNO", 
+                                                         "Crohn", 
+                                                         "Healthy", 
+                                                         "InfOsteitis",
+                                                         "Oncology")))) &
+  guides(fill=guide_legend(nrow=2,
+                           byrow=TRUE))
+
+figS18Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS18_discoveryModelPerformances_filtByProteinsDetectedInValidation.png"),
+       figS18Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS18_discoveryModelPerformances_filtByProteinsDetectedInValidation.pdf"),
+       figS18Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+rm(figS18Plt)
+
+```
+
+#### Figure S19
+
+Plot shuffled label and decoy protein abundances for 10-fold training data. On discovery data, using the subset of candidate proteins also detected in validation.
+
+```{r, fig.height=40, fig.width=32}
+
+# Combine
+figS19Plt <- (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$shuffledLabelsMCC_discoveryWithValidProts_biModalProts + labs(tag="A",
+                                                                                                                                          y="MCC")) /
+           # plot_spacer() /
+            (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$shuffledLabelsMCC_discoveryWithValidProts_multiModalProts + theme(legend.position="none") + labs(tag="B",
+                                                                                                                                                                            y="MCC",)) /
+           # plot_spacer() /
+           (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$decoyProtsMCC_biModalProts_discoveryWithValidProts + labs(tag="C",
+                                                                                                                                    y="MCC",
+                                                                                                                                    x="Random Decoy Protein Sets")) / # discoveryWithValidProts
+           # plot_spacer() /
+            (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$decoyProtsMCC_multiModalProts_discoveryWithValidProts + labs(tag="D",
+                                                                                                                                        y="MCC",
+                                                                                                                                        x="Random Decoy Protein Sets")) / # discoveryWithValidProts
+           (legend) +
+  plot_layout(heights = c(1,1,1,1,0.5)) &
+  labs(y="MCC") &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        plot.title=element_text(size=72),
+        axis.text.y=element_text(size=42),
+        axis.title.y=element_text(size=72),
+        axis.title.x=element_text(size=72),
+        strip.text.x=element_text(size=72),
+        strip.text.y=element_text(size=52))
+
+figS19Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS19_discoveryData_randomisationPerformance_filtByProteinsDetectedInValidation.png"),
+       figS19Plt,
+       width=10000,
+       height=12500,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS19_discoveryData_randomisationPerformance_filtByProteinsDetectedInValidation.pdf"),
+       figS19Plt,
+       width=10000,
+       height=12500,
+       device="pdf",
+       units="px")
+
+rm(figS19Plt)
+
+```
+
+#### Figure S20
+
+Plot shuffled label and decoy protein abundances for held-out discovery test data, using the subset of candidate proteins also detected in validation.
+
+```{r, fig.height=24, fig.width=32}
+
+# Combine
+figS20Plt <- (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$shuffledLabelsMCC_heldOutTestData_discoveryWithValidProts_bPCA + labs(tag="A") +
+                theme(legend.position="none")) +
+             (plotList$`15_validationDataPredictionModelling_figs_bPCA.rds`$decoyProtsMCC_heldOutTestData_discoveryWithValidProts_bPCA + labs(tag="B") +
+                labs(fill="Condition") +
+                theme(legend.position="bottom",
+                      legend.direction="horizontal",
+                      legend.text=element_text(size=68),
+                      legend.key.size = unit(6.5, "line"),
+                      legend.title=element_text(size=76))) +
+  plot_layout(heights = c(1,1)) &
+  labs(y="MCC",
+       x="Predictions") &
+  theme(plot.tag = element_text(face = "bold", 
+                                size = 100),
+        plot.title=element_text(size=72),
+        axis.text.y=element_text(size=72),
+        axis.title.y=element_text(size=100),
+        axis.title.x=element_text(size=100),
+        strip.text.x=element_text(size=72),
+        strip.text.y=element_text(size=84))
+
+figS20Plt
+
+# Save
+ggsave(here::here(figDir, 
+                  "figS20_discoveryData_heldOutData_randomisationPerformance_filtByProteinsDetectedInValidation.png"),
+       figS20Plt,
+       width=10000,
+       height=10000,
+       units="px")
+ggsave(here::here(figDir,
+                  "figS20_discoveryData_heldOutData_randomisationPerformance_filtByProteinsDetectedInValidation.pdf"),
+       figS20Plt,
+       width=10000,
+       height=10000,
+       device="pdf",
+       units="px")
+
+rm(figS20Plt)
+rm(plotList)
+
+```
+
+
