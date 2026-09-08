@@ -1,18 +1,18 @@
 
+
 # Folders
-**/data/*
+data/base/*
+!data/base/annotation/
 **/meetings*/*
 **/results/*
 **/singularityCompile/*
 **/paper/*
 **omnipath*/*
-
 # Documents
 **/*.pptx
 **/*.docx
 **/cnoPaperFigures.pptx
 **/paperMethodsResults.docx
-
 # R data types
 **/*RData
 **/*Rdata
@@ -23,3 +23,4 @@
 **/*Rproj.user/*
 **/*sif
 .Rproj.user
+
