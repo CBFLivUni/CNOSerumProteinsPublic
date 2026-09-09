@@ -2,6 +2,7 @@
 
 # Folders
 data/base/*
+data/pub*
 !data/base/annotation/
 **/meetings*/*
 **/results/*
