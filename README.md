@@ -1,7 +1,6 @@
 # Identification of Protein Biomarkers for the Discrimination of CNO
 
-<!-- [DOI](XXX) -->
-
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22661404.svg)](https://doi.org/10.5281/zenodo.22661404)
 
 ## Experimental Design
 
